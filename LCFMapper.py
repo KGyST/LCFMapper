@@ -99,13 +99,27 @@ _U_ = 20;   _V_ = 21;   _W_ = 22;   _X_ = 23;   _Y_ = 24
 _Z_ = 25
 
 
-class XLSXLoader():
+class XLSXLoader:
     def __init__(self, table_url:str):
         import openpyxl as opx
         self.wb = opx.load_workbook(table_url)
 
     def __getitem__(self, sheet_name:str):
-        return [cell.value for cell in [row for row in self.wb[sheet_name]]]
+        _result = []
+        try:
+            for row in self.wb[sheet_name]:
+                _row = []
+                for cell in row:
+                    _v = cell.value
+                    _row.append(_v)
+            return  _result
+        except:
+            print(_result)
+        # try:
+        #     _result = [cell.value for cell in [row for row in self.wb[sheet_name]]]
+        # except:
+        #     print(_result)
+        # return _result
 
 
 class ParamMapping:
@@ -120,8 +134,8 @@ class ParamMapping:
 
 class ParamMappingContainer:
     def __init__(self, p_sXLSX:str):
-        # FIXME Google Spreadsheet, too
         self._mappingList = []
+        # FIXME Google Spreadsheet, too
         self.loader = XLSXLoader(p_sXLSX)
 
         for _sheetName, _paramType in PARAM_TYPES.items():
