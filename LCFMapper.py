@@ -181,7 +181,7 @@ class GUIAppSingleton(tk.Frame):
         self.progressInfo.config(text=f"{self._iCurrent}/{self._iTotal}")
 
     def __init__(self):
-        tk.Frame.__init__(self)
+        super().__init__(self)
         self.top = self.winfo_toplevel()
 
         self.warnings = []
