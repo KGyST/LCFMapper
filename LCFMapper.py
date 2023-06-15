@@ -23,10 +23,11 @@ import tkinter as tk
 import tkinter.filedialog
 
 from configparser import *  #FIXME not *
-import csv
 
 import pip
 import multiprocessing as mp
+
+import asyncio
 
 try:
     from lxml import etree
@@ -161,6 +162,24 @@ class ParamMappingContainer:
 
 @singleton
 class GUIAppSingleton(tk.Frame):
+    @property
+    def iTotal(self):
+        return self._iTotal
+
+    @iTotal.setter
+    def iTotal(self, value):
+        self._iTotal = value
+        self.progressInfo.config(text=f"{self._iCurrent}/{self._iTotal}")
+
+    @property
+    def iCurrent(self):
+        return self._iCurrent
+
+    @iCurrent.setter
+    def iCurrent(self, value):
+        self._iCurrent = value
+        self.progressInfo.config(text=f"{self._iCurrent}/{self._iTotal}")
+
     def __init__(self):
         tk.Frame.__init__(self)
         self.top = self.winfo_toplevel()
@@ -184,9 +203,12 @@ class GUIAppSingleton(tk.Frame):
 
         self.warnings = []
 
-        self.bo                 = None
-        self.googleSpreadsheet  = None
-        self.bWriteToSelf       = False             # Whether to write back to the file itself
+        # self.bo                 = None
+        # self.googleSpreadsheet  = None
+        # self.bWriteToSelf       = False             # Whether to write back to the file itself
+
+        self._iCurrent = 0
+        self._iTotal = 0
 
         try:
             for cName, cValue in self.currentConfig.items('ArchiCAD'):
@@ -259,6 +281,12 @@ class GUIAppSingleton(tk.Frame):
         self.cleanupCheckButton.grid({"row": 0, "column": iC}); iC += 1
         CreateToolTip(self.cleanupCheckButton, "Delete temporary files after conversion")
 
+        iF += 1
+
+        self.progressInfo = tk.Label(self.top)
+        self.progressInfo.grid({"row": iF, "column": 0, "sticky": tk.W}); iC += 1
+
+
     @staticmethod
     def clear_data():
         DestXML.dest_dict.clear()
@@ -268,17 +296,24 @@ class GUIAppSingleton(tk.Frame):
         DestResource.pict_dict.clear()
 
     def start(self):
+        self.startButton.setvar("state", "disabled")
+        # self._start()
+        asyncio.run(self._start())
+        print ("Starting conversion")
+
+    async def _start(self):
         """
         :return:
         """
         self.clear_data()
 
-        print ("Starting conversion")
+        # print ("Starting conversion")
         SourceXML.sSourceXMLDir = self.SourceXMLDirName.get()
         SourceResource.sSourceResourceDir = self.SourceImageDirName.get()
 
-        self.scanDirs(SourceXML.sSourceXMLDir)
-        self.scanDirs(SourceResource.sSourceResourceDir)
+        # await self.scanDirs(SourceXML.sSourceXMLDir)
+        # await self.scanDirs(SourceResource.sSourceResourceDir)
+        await asyncio.gather(self.scanDirs(SourceXML.sSourceXMLDir), self.scanDirs(SourceResource.sSourceResourceDir))
 
         tempDir = tempfile.mkdtemp()
         tempGDLDir = tempfile.mkdtemp()
@@ -368,7 +403,9 @@ class GUIAppSingleton(tk.Frame):
 
         print("*****FINISHED SUCCESFULLY******")
 
-    def scanDirs(self, p_sRootFolder, p_sCurrentFolder='', p_acceptedFormatS=(".XML",)):
+        self.startButton.setvar("state", "active")
+
+    async def scanDirs(self, p_sRootFolder, p_sCurrentFolder='', p_acceptedFormatS=(".XML",)):
         """
         only scanning input dir recursively to set up xml and image files' list
         :param p_sRootFolder:
@@ -383,6 +420,8 @@ class GUIAppSingleton(tk.Frame):
                     src = os.path.join(p_sRootFolder, p_sCurrentFolder, f)
                     if not os.path.isdir(src):
                     # if it IS NOT a folder
+                        GUIAppSingleton().iTotal += 1
+
                         if os.path.splitext(os.path.basename(f))[1].upper() in p_acceptedFormatS:
                             SourceXML(os.path.join(p_sCurrentFolder, f))
                         else:
@@ -393,7 +432,7 @@ class GUIAppSingleton(tk.Frame):
                                     sI.isEncodedImage = True
                     else:
                     # if it IS a folder
-                        self.scanDirs(p_sRootFolder, os.path.join(p_sCurrentFolder, f))
+                        await self.scanDirs(p_sRootFolder, os.path.join(p_sCurrentFolder, f))
                 except KeyError:
                     print("KeyError %s" % f)
                     continue
@@ -405,34 +444,34 @@ class GUIAppSingleton(tk.Frame):
 
     def writeConfigBack(self, ):
         # FIXME encrypting of sensitive data
+        if not self.bDebug:
+            currentConfig = RawConfigParser()
+            currentConfig.add_section("ArchiCAD")
+            currentConfig.set("ArchiCAD", "sourcexlsxpath",     self.SourceXLSXPath.get())
+            currentConfig.set("ArchiCAD", "sourcedirname",      self.SourceXMLDirName.get())
+            currentConfig.set("ArchiCAD", "inputimagesource",   self.SourceImageDirName.get())
+            currentConfig.set("ArchiCAD", "targetlcfpath",      self.TargetLCFPath.get())
+            currentConfig.set("ArchiCAD", "aclocation",         self.ACLocation.get())
+            currentConfig.set("ArchiCAD", "bcleanup",           str(self.bCleanup.get()))
+            currentConfig.set("ArchiCAD", "bdebug",             str(self.bDebug.get()))
+            currentConfig.set("ArchiCAD", "allkeywords",        ', '.join(sorted(list(XMLFile.all_keywords))))
 
-        currentConfig = RawConfigParser()
-        currentConfig.add_section("ArchiCAD")
-        currentConfig.set("ArchiCAD", "sourcexlsxpath",     self.SourceXLSXPath.get())
-        currentConfig.set("ArchiCAD", "sourcedirname",      self.SourceXMLDirName.get())
-        currentConfig.set("ArchiCAD", "inputimagesource",   self.SourceImageDirName.get())
-        currentConfig.set("ArchiCAD", "targetlcfpath",      self.TargetLCFPath.get())
-        currentConfig.set("ArchiCAD", "aclocation",         self.ACLocation.get())
-        currentConfig.set("ArchiCAD", "bcleanup",           str(self.bCleanup.get()))
-        currentConfig.set("ArchiCAD", "bdebug",             str(self.bDebug.get()))
-        currentConfig.set("ArchiCAD", "allkeywords",        ', '.join(sorted(list(XMLFile.all_keywords))))
+            # if self.googleSpreadsheet:
+            #     currentConfig.add_section("GoogleSpreadsheetAPI")
+            #     currentConfig.set("GoogleSpreadsheetAPI", "access_token",   self.googleSpreadsheet.googleCreds.token)
+            #     currentConfig.set("GoogleSpreadsheetAPI", "refresh_token",  self.googleSpreadsheet.googleCreds.refresh_token)
+            #     currentConfig.set("GoogleSpreadsheetAPI", "id_token",       self.googleSpreadsheet.googleCreds.id_token)
+            #     currentConfig.set("GoogleSpreadsheetAPI", "token_uri",      self.googleSpreadsheet.googleCreds.token_uri)
+            #     currentConfig.set("GoogleSpreadsheetAPI", "client_id",      self.googleSpreadsheet.googleCreds.client_id)
+            #     currentConfig.set("GoogleSpreadsheetAPI", "client_secret",  self.googleSpreadsheet.googleCreds.client_secret)
 
-        # if self.googleSpreadsheet:
-        #     currentConfig.add_section("GoogleSpreadsheetAPI")
-        #     currentConfig.set("GoogleSpreadsheetAPI", "access_token",   self.googleSpreadsheet.googleCreds.token)
-        #     currentConfig.set("GoogleSpreadsheetAPI", "refresh_token",  self.googleSpreadsheet.googleCreds.refresh_token)
-        #     currentConfig.set("GoogleSpreadsheetAPI", "id_token",       self.googleSpreadsheet.googleCreds.id_token)
-        #     currentConfig.set("GoogleSpreadsheetAPI", "token_uri",      self.googleSpreadsheet.googleCreds.token_uri)
-        #     currentConfig.set("GoogleSpreadsheetAPI", "client_id",      self.googleSpreadsheet.googleCreds.client_id)
-        #     currentConfig.set("GoogleSpreadsheetAPI", "client_secret",  self.googleSpreadsheet.googleCreds.client_secret)
-
-        with open(os.path.join(self.appDataDir, "LCFMapper.ini"), 'w', encoding="UTF-8") as configFile:
-            #FIXME proper config place
-            try:
-                currentConfig.write(configFile)
-            except UnicodeEncodeError:
-                #FIXME
-                pass
+            with open(os.path.join(self.appDataDir, "LCFMapper.ini"), 'w', encoding="UTF-8") as configFile:
+                #FIXME proper config place
+                try:
+                    currentConfig.write(configFile)
+                except UnicodeEncodeError:
+                    #FIXME
+                    pass
         self.top.destroy()
 
 
@@ -465,6 +504,7 @@ def processOneXML(p_Data):
         pass
     with open(destPath, "wb") as file_handle:
         mdp.write(file_handle, pretty_print=True, encoding="UTF-8", xml_declaration=True, )
+    GUIAppSingleton().iCurrent += 1
 
 
 def main():
