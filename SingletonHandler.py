@@ -1,29 +1,58 @@
 import tkinter as tk
 
 
-def handle_key(event):
-    modifiers = event.state
-    keysym = event.keysym
+class UndoableEntry(tk.Entry):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.old_text = self.get()
 
-    # Check if only one non-modifier key was pressed
-    if not modifiers and len(keysym) == 1 or (modifiers == 8 and len(keysym) == 1):
-        hotkey_string = keysym
-        print("Hotkey pressed:", hotkey_string)
+    def insert(self, index, string):
+        self.old_text = self.get()
+        super().insert(index, string)
+
+    def delete(self, start, end=None):
+        self.old_text = self.get()
+        super().delete(start, end)
+
+
+class Transaction:
+    def __init__(self, entry_widget, new_text):
+        self.entry_widget = entry_widget
+        self.old_text = entry_widget.get()
+        self.new_text = new_text
+
+    def execute(self):
+        self.entry_widget.delete(0, tk.END)
+        self.entry_widget.insert(0, self.new_text)
+
+    def undo(self):
+        self.entry_widget.delete(0, tk.END)
+        self.entry_widget.insert(0, self.old_text)
+
+
+
+# Example usage
+def perform_transaction():
+    transaction = Transaction(entry, "Modified Text")
+    transaction.execute()
+
+    print("Transaction executed")
+    print("Old text:", transaction.old_text)
+    print("New text:", transaction.new_text)
+    print("Current text:", entry.get())
+
+    # Undo the transaction
+    transaction.undo()
+    print("Transaction undone")
+    print("Current text after undo:", entry.get())
 
 
 root = tk.Tk()
 
-# Create a label widget
-label = tk.Label(root, text="Press any key combination")
+entry = UndoableEntry(root)
+entry.pack()
 
-# Place the label widget on the window
-label.pack()
+button = tk.Button(root, text="Perform Transaction", command=perform_transaction)
+button.pack()
 
-# Bind the key event to the label widget
-label.bind("<Key>", handle_key)
-
-# Set the focus to the label widget so that it receives the key events
-label.focus_set()
-
-# Start the Tkinter event loop
 root.mainloop()
