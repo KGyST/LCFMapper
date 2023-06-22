@@ -1,78 +1,119 @@
 import tkinter as tk
 import asyncio
 from tkinter import scrolledtext
-from functools import reduce
-#FIXME transaction recprds
 #FIXME variable width input handling
 #FIXME tooltip improvements
 
 
-class TransactionRecord:
-    def __init__(self):
-        self.transactions = []
+class StateList:
+    """
+    Master Class of program's state for Undo/Redo functionality
+    """
+    def __init__(self, initial_state: 'Transaction'):
+        self.lTransactions:list = [initial_state]
+        self.iTransaction = 0
+        self.currentState = initial_state
 
-    def add_transaction(self, transaction):
-        self.transactions.append(transaction)
+    def append(self, transaction: 'Transaction'):
+        if self.iTransaction < len(self.lTransactions) - 1:
+            self.lTransactions = self.lTransactions[:self.iTransaction]
 
-    def undo_last_transaction(self):
-        if self.transactions:
-            transaction = self.transactions.pop()
-            transaction.undo()
+        transaction.refresh(self.currentState)
+        self.lTransactions.append(transaction)
+        self.currentState = transaction
+        self.iTransaction = len(self.lTransactions) - 1
 
+    def undo(self)-> 'Transaction':
+        if self.iTransaction > 0:
+            self.iTransaction -= 1
+            self.currentState = self.lTransactions[self.iTransaction]
+        return self.currentState
 
-class UndoableEntry(tk.Entry):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.transaction_record = TransactionRecord()
-        self.bind("<Key>", self.on_key_press)
-
-    def on_key_press(self, event):
-        # Skip modifier keys
-        STATE_CTRL = 4
-        # STATE_LEFT_ALT = 8
-        STATE_RIGHT_ALT = 64
-
-        if  event.keysym in ["Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R"] \
-        or  event.state & STATE_CTRL\
-        or  event.state & STATE_RIGHT_ALT:
-            # or  event.state & STATE_LEFT_ALT\
-            return
-
-        current_text = self.get()
-        new_text = current_text + event.char
-        transaction = Transaction(self, current_text, new_text)
-        self.transaction_record.add_transaction(transaction)
-
-    def undo_last_transaction(self):
-        self.transaction_record.undo_last_transaction()
-
-
-# class ProgramState:
-#     def __init__(self, widget_stsates:dict):
-#         self.dState = widget_stsates
+    def redo(self)-> 'Transaction':
+        if self.iTransaction < len(self.lTransactions) - 1:
+            self.iTransaction += 1
+            self.currentState = self.lTransactions[self.iTransaction]
+        return self.currentState
 
 
 class Transaction:
-    def __init__(self, entry_widget, old_text, new_text, *args):
-        # self.target = target
-        # self.action = action
-        # self.args = args
-        self.entry_widget = entry_widget
-        self.old_text = old_text
-        self.new_text = new_text
+    def __init__(self, *args):
+        if len(args) and isinstance( args[0], dict):
+            self.dict = args[0]
+        else:
+            self.dict = {VarState(arg).name: VarState(arg) for arg in args}
 
-    def execute(self):
-        # if self.action == 'set':
-        #     self.target = self.args
-        self.entry_widget.delete(0, tk.END)
-        self.entry_widget.insert(0, self.new_text)
+    def __getitem__(self, item):
+        return self.dict[item]
 
-    def undo(self):
-        # if self.action == 'set':
-        #     self.target = self.args
-        self.entry_widget.delete(0, tk.END)
-        self.entry_widget.insert(0, self.old_text)
+    def __setitem__(self, key, value):
+        self.dict[key] = value
 
+    def __delitem__(self, key):
+        del self.dict[key]
+
+    def __contains__(self, item):
+        return item in self.dict
+
+    def keys(self):
+        return self.dict.keys()
+
+    def set(self):
+        for vs in self.dict.values():
+            vs.set()
+
+    def __sub__(self, other:'Transaction')->'Transaction':
+        _result = Transaction()
+
+        for k, v in self.dict.items():
+            if k in other:
+                if v != other[k]:
+                    _result[k] = v
+        return _result
+
+    # def __add__(self, other:'Transaction'):
+    #     return {**self.dict, **other}
+
+    def refresh(self, other:'Transaction'):
+        for k in self.dict:
+            if k in other and self.dict[k] == other[k]:
+                self.dict[k] = other[k]
+
+
+# class Undoable:
+#     def __init__(self, state_list):
+#         self.stateList = state_list
+#
+#     def __call__(self, func):
+#         self.stateList.append()
+#         def wrapped_function(*args, **kwargs):
+#             return func(*args, **kwargs)
+#         return wrapped_function
+
+
+class VarState:
+    def __init__(self, var):
+        if isinstance(var, tk.StringVar):
+            self.var = var
+            self.name = var._name
+            self.value = var.get()
+        else:
+            self.var = var
+            self.name = var._name
+            self.value = var.get("1.0", "end")
+
+    def set(self):
+        if isinstance(self.var, tk.StringVar):
+            self.var.set(self.value)
+        else:
+            self.var.replace("1.0", "end", self.value, )
+
+    def __str__(self):
+        pass
+        #FIXME
+
+    def __eq__(self, other:'VarState')->bool:
+        return self.value == other.value
 
 
 class TestFrame(tk.Frame):
@@ -80,25 +121,43 @@ class TestFrame(tk.Frame):
         super().__init__()
         self.top = self.winfo_toplevel()
 
-        self.transactionS = []
-        self.sEntry           = tk.StringVar()
-        # self.observer = self.sEntry.trace_variable("w", self._sEntryModified)
-        self.transaction_record = TransactionRecord()
+        self.sText           = tk.StringVar()
+        self.sInt           = tk.StringVar()
+        # self.observer = self.sText.trace_variable("w", self._sEntryModified)
+
+        _col = 0
+        self.label = tk.Label(self.top, text="Initial Text: ")
+        self.label.grid(row=1, column=_col)
+        _col += 1
+        self.textEntry = tk.Entry(self.top, {"textvariable": self.sText})
+        self.textEntry.grid(row=1, column=_col)
+        _col += 1
+        self.label = tk.Label(self.top, text="Number: ")
+        self.label.grid(row=1, column=_col)
+        _col += 1
+        self.intEntry = tk.Entry(self.top, {"textvariable": self.sInt})
+        self.intEntry.grid(row=1, column=_col)
+        _col += 1
+        self.buttonStart = tk.Button(self.top, text="Start", command=self._start_processing)
+        self.buttonStart.grid(row=1, column=_col)
+        _col += 1
+        self.buttonCancel = tk.Button(self.top, text="Cancel", command=self._cancel_processing, state=tk.DISABLED)
+        self.buttonCancel.grid(row=1, column=_col)
+        _col += 1
 
         self.scrolledText = scrolledtext.ScrolledText()
-        self.scrolledText.grid(row=0, column=0, columnspan=4)
-        self.entry = UndoableEntry(self.top, {"textvariable": self.sEntry})
-        self.entry.grid(row=1, column=0)
-        self.label = tk.Label(self.top, text="Initial Text")
-        self.label.grid(row=1, column=1)
-        self.buttonStart = tk.Button(self.top, text="Start", command=self._update_label_text)
-        self.buttonStart.grid(row=1, column=2)
-        self.buttonCancel = tk.Button(self.top, text="Cancel", command=self._cancel, state=tk.DISABLED)
-        self.buttonCancel.grid(row=1, column=3)
-        self.top.bind("<Key>", self._handle_key)
+        self.scrolledText.grid(row=0, column=0, columnspan=_col)
+
         self.top.bind("<Control-z>", self._undo)
+        self.top.bind("<Control-y>", self._redo)
+        # self.top.bind("<Shift-Control-z>", self._redo)
 
         self.top.protocol("WM_DELETE_WINDOW", self._close)
+
+        self.trackedFields = self.sText, self.sInt, self.scrolledText
+        self.stateList = StateList(self.getState())
+
+        # ------
 
         self.loop = asyncio.get_event_loop()
         self.loop.create_task(self.asyncio_event_loop())
@@ -110,61 +169,52 @@ class TestFrame(tk.Frame):
             self.top.update()
             await asyncio.sleep(interval)
 
-    async def _modify_label_text(self):
-        for i in range(100):
+    # ------
+
+    async def _process(self):
+        for i in range(int(self.sInt.get())):
             await asyncio.sleep(.1)  # Simulate a long-running task
-            self.label.config(text=(text:=f"New Text {i}\n"))
+            self.label.config(text=(text:=f"{self.sText.get()} {i}\n"))
             self.scrolledText.insert("end", text)
             self.scrolledText.see("end")
-        self.buttonStart.config(state=tk.NORMAL, text="Modify")
-        self.buttonCancel.config(state=tk.DISABLED)
+        self._end_of_processing()
 
-    def _update_label_text(self, event=None):
+    def _start_processing(self, event=None):
         self.buttonStart.config(state=tk.DISABLED, text="Processing...")
         self.buttonCancel.config(state=tk.ACTIVE)
-        self.scrolledText.delete("1.0", "end")
-        self.task = self.loop.create_task(self._modify_label_text())
+        self.task = self.loop.create_task(self._process())
+
+    def _cancel_processing(self):
+        self.task.cancel()
+        self._end_of_processing()
+
+    # ------
+
+    def _end_of_processing(self):
+        self.buttonStart.config(state=tk.NORMAL, text="Modify")
+        self.buttonCancel.config(state=tk.DISABLED)
+        self.stateList.append(self.getState())
+
+    def _undo(self, *_):
+        _state = self.stateList.undo()
+        self.setState(_state)
+
+    def _redo(self, *_):
+        _state = self.stateList.redo()
+        self.setState(_state)
+
+    def getState(self)->Transaction:
+        return Transaction(*self.trackedFields)
+
+    def setState(self, state:Transaction):
+        state.set()
+        # self.sText.trace_vdelete("w", self.observer)
+        # s.set()
+        # self.observer = self.sText.trace_variable("w", self._sEntryModified)
 
     def _close(self):
         self.loop.stop()
         self.top.destroy()
-
-    def _cancel(self):
-        self.task.cancel()
-        self.buttonStart.config(state=tk.NORMAL, text="Modify")
-        self.buttonCancel.config(state=tk.DISABLED)
-
-    def _handle_key(self, event):
-        # hotkey_string = event.keysym
-        if event.widget.widgetName == 'entry':
-            pass
-        # if event.state:
-        #     print("Hotkey pressed:", hotkey_string)
-        #     self.scrolledText.insert("end", hotkey_string)
-        #     self.scrolledText.see("end")
-
-    def _sEntryModified(self, *_):
-        # self._do(Transaction(self.sEntry, 'set'))
-        pass
-
-    def _do(self, transaction):
-        self.transactionS.append(transaction)
-
-    def _undo(self, *_):
-        # _transaction = self.transactionS.pop()
-        # if _transaction.action == 'set':
-        #     _transaction.target.set(*_transaction.args)
-        self.entry.undo_last_transaction()
-
-    def _redo(self):
-        pass
-
-    def _states_to_string(self):
-        return " ".join(self.transactionS)
-
-    def getState(self):
-        return {self.sEntry: self.sEntry.get()}
-
 
 app = TestFrame()
 

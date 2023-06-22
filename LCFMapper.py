@@ -1,17 +1,10 @@
 #!C:\Program Files\Python27amd64\python.exe
 # -*- coding: utf-8 -*-
-#HOTFIXREQ if image dest folder is retained, remove common images from it
-#HOTFIXREQ ImportError: No module named googleapiclient.discovery
-#HOTFIXREQ unicode error when running ac command in path with native characters
-#HOTFIXREQ SOURCE_IMAGE_DIR_NAME images are not renamed at all
-#FIXME renaming errors and param csv parameter overwriting
-#FIXME append param to the end when no argument for position
-#FIXME library_images copy always as temporary folder; instead junction
-#FIXME param editor should offer auto param inserting from Listing Parameters Google Spreadsheet
-#FIXME automatic checking and warning of (collected) old project's names
-#FIXME UI process messages
-#FIXME MigrationTable progressing
-#FIXME GDLPict progressing
+"""
+Author: Sam KARLI
+Date: 2023-06-19
+Description:
+"""
 
 import os.path
 from os import listdir
