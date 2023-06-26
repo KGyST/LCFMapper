@@ -1,6 +1,7 @@
 import tkinter as tk
 import asyncio
 from tkinter import scrolledtext
+import copy
 #FIXME variable width input handling
 #FIXME tooltip improvements
 
@@ -10,38 +11,35 @@ class StateList:
     Master Class of program's state for Undo/Redo functionality
     """
     def __init__(self, initial_state: 'Transaction'):
-        self.lTransactions:list = [initial_state]
+        self.lTransactionS:list = [initial_state]
         self.iTransaction = 0
         self.currentState = initial_state
 
     def append(self, transaction: 'Transaction'):
-        if self.iTransaction < len(self.lTransactions) - 1:
-            self.lTransactions = self.lTransactions[:self.iTransaction]
+        if self.iTransaction < len(self.lTransactionS) - 1:
+            self.lTransactionS = self.lTransactionS[:self.iTransaction]
 
         transaction.refresh(self.currentState)
-        self.lTransactions.append(transaction)
+        self.lTransactionS.append(transaction)
         self.currentState = transaction
-        self.iTransaction = len(self.lTransactions) - 1
+        self.iTransaction = len(self.lTransactionS) - 1
 
     def undo(self)-> 'Transaction':
         if self.iTransaction > 0:
             self.iTransaction -= 1
-            self.currentState = self.lTransactions[self.iTransaction]
+            self.currentState = self.lTransactionS[self.iTransaction]
         return self.currentState
 
     def redo(self)-> 'Transaction':
-        if self.iTransaction < len(self.lTransactions) - 1:
+        if self.iTransaction < len(self.lTransactionS) - 1:
             self.iTransaction += 1
-            self.currentState = self.lTransactions[self.iTransaction]
+            self.currentState = self.lTransactionS[self.iTransaction]
         return self.currentState
 
 
 class Transaction:
     def __init__(self, *args):
-        if len(args) and isinstance( args[0], dict):
-            self.dict = args[0]
-        else:
-            self.dict = {VarState(arg).name: VarState(arg) for arg in args}
+        self.dict = {VarState(arg).name if VarState(arg).name else VarState(arg).id: VarState(arg) for arg in args}
 
     def __getitem__(self, item):
         return self.dict[item]
@@ -55,24 +53,9 @@ class Transaction:
     def __contains__(self, item):
         return item in self.dict
 
-    def keys(self):
-        return self.dict.keys()
-
     def set(self):
         for vs in self.dict.values():
             vs.set()
-
-    def __sub__(self, other:'Transaction')->'Transaction':
-        _result = Transaction()
-
-        for k, v in self.dict.items():
-            if k in other:
-                if v != other[k]:
-                    _result[k] = v
-        return _result
-
-    # def __add__(self, other:'Transaction'):
-    #     return {**self.dict, **other}
 
     def refresh(self, other:'Transaction'):
         for k in self.dict:
@@ -80,37 +63,33 @@ class Transaction:
                 self.dict[k] = other[k]
 
 
-# class Undoable:
-#     def __init__(self, state_list):
-#         self.stateList = state_list
-#
-#     def __call__(self, func):
-#         self.stateList.append()
-#         def wrapped_function(*args, **kwargs):
-#             return func(*args, **kwargs)
-#         return wrapped_function
-
-
 class VarState:
     def __init__(self, var):
+        self.var = var
+        self.id = id(var)
+
         if isinstance(var, tk.StringVar):
-            self.var = var
             self.name = var._name
             self.value = var.get()
-        else:
-            self.var = var
+        elif isinstance(var, scrolledtext.ScrolledText):
             self.name = var._name
             self.value = var.get("1.0", "end")
+        elif isinstance(var, list):
+            self.name = None
+            self.value = copy.deepcopy(var)
 
     def set(self):
         if isinstance(self.var, tk.StringVar):
             self.var.set(self.value)
-        else:
+        elif isinstance(self.var, scrolledtext.ScrolledText):
             self.var.replace("1.0", "end", self.value, )
+        elif isinstance(self.var, list):
+            self.var.clear()
+            self.var.extend(self.value)
 
     def __str__(self):
-        pass
         #FIXME
+        pass
 
     def __eq__(self, other:'VarState')->bool:
         return self.value == other.value
@@ -150,11 +129,13 @@ class TestFrame(tk.Frame):
 
         self.top.bind("<Control-z>", self._undo)
         self.top.bind("<Control-y>", self._redo)
+        # FIXME multiple modifier handling:
         # self.top.bind("<Shift-Control-z>", self._redo)
 
         self.top.protocol("WM_DELETE_WINDOW", self._close)
+        self.testResultList = []
 
-        self.trackedFields = self.sText, self.sInt, self.scrolledText
+        self.trackedFields = self.sText, self.sInt, self.testResultList
         self.stateList = StateList(self.getState())
 
         # ------
@@ -171,15 +152,17 @@ class TestFrame(tk.Frame):
 
     # ------
 
+    def _refresh_scrolledText(self):
+        self.scrolledText.replace("1.0", "end", "\n".join(self.testResultList))
+
     async def _process(self):
         for i in range(int(self.sInt.get())):
             await asyncio.sleep(.1)  # Simulate a long-running task
-            self.label.config(text=(text:=f"{self.sText.get()} {i}\n"))
-            self.scrolledText.insert("end", text)
-            self.scrolledText.see("end")
+            self.testResultList.append(f"{self.sText.get()} {i}")
+            self._refresh_scrolledText()
         self._end_of_processing()
 
-    def _start_processing(self, event=None):
+    def _start_processing(self):
         self.buttonStart.config(state=tk.DISABLED, text="Processing...")
         self.buttonCancel.config(state=tk.ACTIVE)
         self.task = self.loop.create_task(self._process())
@@ -208,6 +191,7 @@ class TestFrame(tk.Frame):
 
     def setState(self, state:Transaction):
         state.set()
+        self._refresh_scrolledText()
         # self.sText.trace_vdelete("w", self.observer)
         # s.set()
         # self.observer = self.sText.trace_variable("w", self._sEntryModified)
@@ -215,6 +199,7 @@ class TestFrame(tk.Frame):
     def _close(self):
         self.loop.stop()
         self.top.destroy()
+
 
 app = TestFrame()
 
