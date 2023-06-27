@@ -8,14 +8,14 @@ import copy
 
 class StateList:
     """
-    Master Class of program's state for Undo/Redo functionality
+    Master Class of program's state/transaction for Undo/Redo functionality
     """
-    def __init__(self, initial_state: 'Transaction'):
+    def __init__(self, initial_state: 'State'):
         self.lTransactionS:list = [initial_state]
         self.iTransaction = 0
         self.currentState = initial_state
 
-    def append(self, transaction: 'Transaction'):
+    def append(self, transaction: 'State'):
         if self.iTransaction < len(self.lTransactionS) - 1:
             self.lTransactionS = self.lTransactionS[:self.iTransaction]
 
@@ -24,20 +24,23 @@ class StateList:
         self.currentState = transaction
         self.iTransaction = len(self.lTransactionS) - 1
 
-    def undo(self)-> 'Transaction':
+    def undo(self)-> 'State':
         if self.iTransaction > 0:
             self.iTransaction -= 1
             self.currentState = self.lTransactionS[self.iTransaction]
         return self.currentState
 
-    def redo(self)-> 'Transaction':
+    def redo(self)-> 'State':
         if self.iTransaction < len(self.lTransactionS) - 1:
             self.iTransaction += 1
             self.currentState = self.lTransactionS[self.iTransaction]
         return self.currentState
 
 
-class Transaction:
+class State:
+    """
+    Describes a new program state
+    """
     def __init__(self, *args):
         self.dict = {VarState(arg).name if VarState(arg).name else VarState(arg).id: VarState(arg) for arg in args}
 
@@ -57,13 +60,16 @@ class Transaction:
         for vs in self.dict.values():
             vs.set()
 
-    def refresh(self, other:'Transaction'):
+    def refresh(self, other: 'State'):
         for k in self.dict:
             if k in other and self.dict[k] == other[k]:
                 self.dict[k] = other[k]
 
 
 class VarState:
+    """
+    Describes a variable that is saved between transactions
+    """
     def __init__(self, var):
         self.var = var
         self.id = id(var)
@@ -95,7 +101,25 @@ class VarState:
         return self.value == other.value
 
 
+class Loop(asyncio.ProactorEventLoop):
+    """
+
+    """
+    def __init__(self, top):
+        super().__init__()
+        self.top = top
+        self.create_task(self.asyncio_event_loop())
+
+    async def asyncio_event_loop(self, interval=0):
+        while True:
+            self.top.update()
+            await asyncio.sleep(interval)
+
+
 class TestFrame(tk.Frame):
+    """
+    Program GUI window class with async working and undo/redo functionality
+    """
     def __init__(self):
         super().__init__()
         self.top = self.winfo_toplevel()
@@ -140,17 +164,8 @@ class TestFrame(tk.Frame):
 
         # ------
 
-        self.loop = asyncio.get_event_loop()
-        self.loop.create_task(self.asyncio_event_loop())
+        self.loop = Loop(self.top)
         self.loop.run_forever()
-
-    # Run the asyncio event loop
-    async def asyncio_event_loop(self, interval=0):
-        while True:
-            self.top.update()
-            await asyncio.sleep(interval)
-
-    # ------
 
     def _refresh_scrolledText(self):
         self.scrolledText.replace("1.0", "end", "\n".join(self.testResultList))
@@ -186,10 +201,10 @@ class TestFrame(tk.Frame):
         _state = self.stateList.redo()
         self.setState(_state)
 
-    def getState(self)->Transaction:
-        return Transaction(*self.trackedFields)
+    def getState(self)->State:
+        return State(*self.trackedFields)
 
-    def setState(self, state:Transaction):
+    def setState(self, state:State):
         state.set()
         self._refresh_scrolledText()
         # self.sText.trace_vdelete("w", self.observer)
