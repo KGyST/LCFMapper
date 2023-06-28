@@ -10,12 +10,12 @@ class StateList:
     """
     Master Class of program's state/transaction for Undo/Redo functionality
     """
-    def __init__(self, initial_state: 'State'):
+    def __init__(self, initial_state: 'ProgramState'):
         self.lTransactionS:list = [initial_state]
         self.iTransaction = 0
         self.currentState = initial_state
 
-    def append(self, transaction: 'State'):
+    def append(self, transaction: 'ProgramState'):
         if self.iTransaction < len(self.lTransactionS) - 1:
             self.lTransactionS = self.lTransactionS[:self.iTransaction]
 
@@ -24,20 +24,20 @@ class StateList:
         self.currentState = transaction
         self.iTransaction = len(self.lTransactionS) - 1
 
-    def undo(self)-> 'State':
+    def undo(self)-> 'ProgramState':
         if self.iTransaction > 0:
             self.iTransaction -= 1
             self.currentState = self.lTransactionS[self.iTransaction]
         return self.currentState
 
-    def redo(self)-> 'State':
+    def redo(self)-> 'ProgramState':
         if self.iTransaction < len(self.lTransactionS) - 1:
             self.iTransaction += 1
             self.currentState = self.lTransactionS[self.iTransaction]
         return self.currentState
 
 
-class State:
+class ProgramState:
     """
     Describes a new program state
     """
@@ -60,7 +60,7 @@ class State:
         for vs in self.dict.values():
             vs.set()
 
-    def refresh(self, other: 'State'):
+    def refresh(self, other: 'ProgramState'):
         for k in self.dict:
             if k in other and self.dict[k] == other[k]:
                 self.dict[k] = other[k]
@@ -108,12 +108,16 @@ class Loop(asyncio.ProactorEventLoop):
     def __init__(self, top):
         super().__init__()
         self.top = top
-        self.create_task(self.asyncio_event_loop())
+        self._task = self.create_task(self.asyncio_event_loop())
 
     async def asyncio_event_loop(self, interval=0):
         while True:
             self.top.update()
             await asyncio.sleep(interval)
+
+    def stop(self) -> None:
+        self._task.cancel()
+        super().stop()
 
 
 class TestFrame(tk.Frame):
@@ -132,7 +136,7 @@ class TestFrame(tk.Frame):
         self.label = tk.Label(self.top, text="Initial Text: ")
         self.label.grid(row=1, column=_col)
         _col += 1
-        self.textEntry = tk.Entry(self.top, {"textvariable": self.sText})
+        self.textEntry = tk.Entry(self.top, {"textvariable": self.sText, "width": 1})
         self.textEntry.grid(row=1, column=_col)
         _col += 1
         self.label = tk.Label(self.top, text="Number: ")
@@ -166,6 +170,7 @@ class TestFrame(tk.Frame):
 
         self.loop = Loop(self.top)
         self.loop.run_forever()
+        # self.loop.run_until_complete(self.loop.asyncio_event_loop() )
 
     def _refresh_scrolledText(self):
         self.scrolledText.replace("1.0", "end", "\n".join(self.testResultList))
@@ -201,10 +206,10 @@ class TestFrame(tk.Frame):
         _state = self.stateList.redo()
         self.setState(_state)
 
-    def getState(self)->State:
-        return State(*self.trackedFields)
+    def getState(self)->ProgramState:
+        return ProgramState(*self.trackedFields)
 
-    def setState(self, state:State):
+    def setState(self, state:ProgramState):
         state.set()
         self._refresh_scrolledText()
         # self.sText.trace_vdelete("w", self.observer)

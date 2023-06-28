@@ -5,6 +5,7 @@ Author: Sam KARLI
 Date: 2023-06-19
 Description:
 """
+# FIXME to provide an UI-filter showing, for example, which parameter exists in which macro
 
 import os.path
 from os import listdir
