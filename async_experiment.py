@@ -101,14 +101,14 @@ class VarState:
         return self.value == other.value
 
 
-class Loop(asyncio.ProactorEventLoop):
+class Loop:
     """
 
     """
     def __init__(self, top):
-        super().__init__()
         self.top = top
-        self._task = self.create_task(self.asyncio_event_loop())
+        self._loop = asyncio.get_event_loop()
+        self._loop.create_task(self.asyncio_event_loop())
 
     async def asyncio_event_loop(self, interval=0):
         while True:
@@ -116,8 +116,13 @@ class Loop(asyncio.ProactorEventLoop):
             await asyncio.sleep(interval)
 
     def stop(self) -> None:
-        self._task.cancel()
-        super().stop()
+        self._loop.stop()
+
+    def create_task(self, task, *args, **kwargs):
+        return self._loop.create_task(*args, **kwargs)
+
+    def run_forever(self):
+        return self._loop.run_forever()
 
 
 class TestFrame(tk.Frame):
@@ -170,7 +175,6 @@ class TestFrame(tk.Frame):
 
         self.loop = Loop(self.top)
         self.loop.run_forever()
-        # self.loop.run_until_complete(self.loop.asyncio_event_loop() )
 
     def _refresh_scrolledText(self):
         self.scrolledText.replace("1.0", "end", "\n".join(self.testResultList))
