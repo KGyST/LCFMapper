@@ -129,19 +129,20 @@ class TestFrame(tk.Frame):
         self.top = self.winfo_toplevel()
 
         self.sText    = tk.StringVar()
-        self.sInt     = tk.StringVar()
+        # self.sInt     = tk.StringVar()
+        self.iInt     = 0
         self.observer = self.sText.trace_variable("w", self._sEntryModified)
 
         _col = 0
-        self.label = tk.Label(self.top, text="Initial Text: ")
-        self.label.grid(row=1, column=_col)
-        _col += 1
+        # self.label = tk.Label(self.top, text="Initial Text: ")
+        # self.label.grid(row=1, column=_col)
+        # _col += 1
         self.textEntry = InputDirPlusText(self.top, "XML Source folder", self.sText, row=1, column=_col)
         _col += 1
         # self.textEntry = tk.Entry(self.top, {"textvariable": self.sText, "width": 1})
         # self.textEntry.grid(row=1, column=_col)
         # _col += 1
-        self.label = tk.Label(self.top, text="Number: ")
+        self.label = tk.Label(self.top, text=f"{self.iInt}")
         self.label.grid(row=1, column=_col)
         _col += 1
         # self.intEntry = tk.Entry(self.top, {"textvariable": self.sInt})
@@ -165,7 +166,7 @@ class TestFrame(tk.Frame):
         self.top.protocol("WM_DELETE_WINDOW", self._close)
         self.testResultList = []
 
-        self.trackedFields = self.sText, self.sInt, self.testResultList
+        self.trackedFields = self.sText, self.testResultList
         self.stateList = StateList(self.getState())
 
         # ------
@@ -176,14 +177,10 @@ class TestFrame(tk.Frame):
     def _refresh_scrolledText(self):
         self.scrolledText.replace("1.0", "end", "\n".join(self.testResultList))
         self.scrolledText.see(tk.END)
+        self.label.config(text=f"{self.iInt}")
 
     async def _process(self):
         await self.scanDirFactory(self.sText.get(), p_sCurrentFolder='')
-
-        # for i in range(int(self.sInt.get())):
-        #     await asyncio.sleep(.1)  # Simulate a long-running task
-        #     self.testResultList.append(f"{self.sText.get()} {i}")
-        #     self._refresh_scrolledText()
         self._end_of_processing()
 
     def _start_processing(self):
@@ -244,7 +241,7 @@ class TestFrame(tk.Frame):
                     src = os.path.join(p_sRootFolder, p_sCurrentFolder, f)
                     if not os.path.isdir(src):
                     # if it IS NOT a folder
-                    #     GUIAppSingleton().iTotal += 1
+                        self.iInt += 1
                         if os.path.splitext(os.path.basename(f))[1].upper() in p_acceptedFormatS:
                             self.testResultList.append(f"{self.sText.get()} {f}")
                             self._refresh_scrolledText()
@@ -254,11 +251,6 @@ class TestFrame(tk.Frame):
                             self.testResultList.append(f"{self.sText.get()} {f}")
                             self._refresh_scrolledText()
                             await asyncio.sleep(0)
-                    # set up replacement dict for other files
-                            # if os.path.splitext(os.path.basename(f))[0].upper() not in SourceResource.source_pict_dict:
-                            #     sI = SourceResource(os.path.join(p_sCurrentFolder, f), p_sBasePath=p_sRootFolder)
-                            #     if SourceResource.sSourceResourceDir in sI.fullPath and SourceResource.sSourceResourceDir:
-                            #         sI.isEncodedImage = True
                     else:
                     # if it IS a folder
                         await self.scanDirFactory(p_sRootFolder, os.path.join(p_sCurrentFolder, f))
