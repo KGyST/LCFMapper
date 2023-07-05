@@ -1,10 +1,10 @@
+import dataclasses
 import tkinter as tk
 import asyncio
-import typing
 from tkinter import scrolledtext
 #FIXME variable width input handling
 #FIXME tooltip improvements
-
+from typing import Callable
 
 from GSMXMLLib import *
 from lxml import etree
@@ -16,30 +16,30 @@ class StateList:
     Master Class of program's state/transaction for Undo/Redo functionality
     """
     def __init__(self, initial_state: 'ProgramState'):
-        self.lTransactionS:list = [initial_state]
+        self.transactionS:list = [initial_state]
         self.iTransaction = 0
         self.currentState = initial_state
 
     def append(self, transaction: 'ProgramState'):
-        if self.iTransaction < len(self.lTransactionS) - 1:
-            self.lTransactionS = self.lTransactionS[:self.iTransaction]
+        if self.iTransaction < len(self.transactionS) - 1:
+            self.transactionS = self.transactionS[:self.iTransaction+1]
 
         transaction.refresh(self.currentState)
-        self.lTransactionS.append(transaction)
+        self.transactionS.append(transaction)
         self.currentState = transaction
-        self.iTransaction = len(self.lTransactionS) - 1
+        self.iTransaction = len(self.transactionS) - 1
 
     def undo(self)-> 'ProgramState':
         if self.iTransaction > 0:
             self.iTransaction -= 1
-            self.currentState = self.lTransactionS[self.iTransaction]
-        return self.currentState
+            self.currentState = self.transactionS[self.iTransaction]
+            return self.currentState
 
     def redo(self)-> 'ProgramState':
-        if self.iTransaction < len(self.lTransactionS) - 1:
+        if self.iTransaction < len(self.transactionS) - 1:
             self.iTransaction += 1
-            self.currentState = self.lTransactionS[self.iTransaction]
-        return self.currentState
+            self.currentState = self.transactionS[self.iTransaction]
+            return self.currentState
 
 
 class ProgramState:
@@ -101,6 +101,9 @@ class VarState:
     def __eq__(self, other:'VarState')->bool:
         return self.value == other.value
 
+    def __repr__(self):
+        return ": ".join((self.name if self.name else str(self.id), self.value.__repr__(),))
+
 
 class Loop:
     """
@@ -115,9 +118,30 @@ class Loop:
         while True:
             self.top.update()
             await asyncio.sleep(interval)
+            _task = asyncio.current_task()
+            if _task:
+                if _task.cancelled():
+                    raise asyncio.CancelledError()
 
     def __getattr__(self, item):
         return getattr(self._loop, item)
+
+
+class Observer:
+    observerS = []
+
+    def __init__(self, variable, callback: Callable, mode:str= "w"):
+        self.callback = callback
+        self.variable = variable
+        self.mode = mode
+        self.observerS.append(self)
+        self.register()
+
+    def register(self):
+        self.observer = self.variable.trace(self.mode, self.callback)
+
+    def unregister(self):
+        self.variable.trace_vdelete(self.mode, self.observer)
 
 
 class TestFrame(tk.Frame):
@@ -129,25 +153,14 @@ class TestFrame(tk.Frame):
         self.top = self.winfo_toplevel()
 
         self.sText    = tk.StringVar()
-        # self.sInt     = tk.StringVar()
         self.iInt     = 0
-        self.observer = self.sText.trace_variable("w", self._sEntryModified)
 
         _col = 0
-        # self.label = tk.Label(self.top, text="Initial Text: ")
-        # self.label.grid(row=1, column=_col)
-        # _col += 1
         self.textEntry = InputDirPlusText(self.top, "XML Source folder", self.sText, row=1, column=_col)
         _col += 1
-        # self.textEntry = tk.Entry(self.top, {"textvariable": self.sText, "width": 1})
-        # self.textEntry.grid(row=1, column=_col)
-        # _col += 1
         self.label = tk.Label(self.top, text=f"{self.iInt}")
         self.label.grid(row=1, column=_col)
         _col += 1
-        # self.intEntry = tk.Entry(self.top, {"textvariable": self.sInt})
-        # self.intEntry.grid(row=1, column=_col)
-        # _col += 1
         self.buttonStart = tk.Button(self.top, text="Start", command=self._start_processing)
         self.buttonStart.grid(row=1, column=_col)
         _col += 1
@@ -156,7 +169,7 @@ class TestFrame(tk.Frame):
 
         self.scrolledText = scrolledtext.ScrolledText()
         self.scrolledText.grid(row=0, column=0, columnspan=_col, sticky=tk.SE + tk.NW)
-        # self.scrolledText.grid({"row":0, "column":0, "columnspan":_col, "sticky":tk.SE + tk.NW} )
+        # FIXME self.scrolledText.grid({"row":0, "column":0, "columnspan":_col, "sticky":tk.SE + tk.NW} )
 
         self.top.bind("<Control-z>", self._undo)
         self.top.bind("<Control-y>", self._redo)
@@ -166,53 +179,74 @@ class TestFrame(tk.Frame):
         self.top.protocol("WM_DELETE_WINDOW", self._close)
         self.testResultList = []
 
-        self.trackedFields = self.sText, self.testResultList
+        self.trackedFieldS = self.sText, self.testResultList
+        Observer(self.sText, self._textEntryModified)
         self.stateList = StateList(self.getState())
+        self.task = None
 
         # ------
 
         self.loop = Loop(self.top)
         self.loop.run_forever()
 
-    def _refresh_scrolledText(self):
+    def _refresh_outputs(self):
         self.scrolledText.replace("1.0", "end", "\n".join(self.testResultList))
         self.scrolledText.see(tk.END)
-        self.label.config(text=f"{self.iInt}")
+        self.label.config(text=f"{self.iInt}, {len(self.stateList.transactionS)}, {self.stateList.iTransaction+1}")
 
     async def _process(self):
         await self.scanDirFactory(self.sText.get(), p_sCurrentFolder='')
-        self._end_of_processing()
 
     def _start_processing(self):
+        self._cancel_processing()
         self.buttonStart.config(state=tk.DISABLED, text="Processing...")
         self.buttonCancel.config(state=tk.ACTIVE)
+        self.textEntry.config(state=tk.DISABLED)
         self.task = self.loop.create_task(self._process())
+        self.task.add_done_callback(self._end_of_processing)
 
     def _cancel_processing(self):
-        self.task.cancel()
-        self._end_of_processing()
+        if self.task:
+            self.task.cancel()
+        self.task=None
+        self.testResultList.clear()
+        self.iInt = 0
 
     # ------
 
-    def _end_of_processing(self):
+    def _end_of_processing(self, task):
         self.buttonStart.config(state=tk.NORMAL, text="Modify")
         self.buttonCancel.config(state=tk.DISABLED)
-        self.stateList.append(self.getState())
+        self.textEntry.config(state=tk.NORMAL)
+        if task._state != 'CANCELLED':
+            self.stateList.append(self.getState())
+        else:
+            self.setState(self.stateList.currentState)
+        self._refresh_outputs()
 
     def _undo(self, *_):
+        self._cancel_processing()
         _state = self.stateList.undo()
-        self.setState(_state)
+        if _state:
+            self.setState(_state)
 
     def _redo(self, *_):
+        self._cancel_processing()
         _state = self.stateList.redo()
-        self.setState(_state)
+        if _state:
+            self.setState(_state)
 
     def getState(self)->ProgramState:
-        return ProgramState(*self.trackedFields)
+        return ProgramState(*self.trackedFieldS)
 
     def setState(self, state:ProgramState):
+        for o in Observer.observerS:
+            o.unregister()
         state.set()
-        self._refresh_scrolledText()
+
+        for o in Observer.observerS:
+            o.register()
+        self._refresh_outputs()
 
     def _close(self):
         self.loop.stop()
@@ -220,9 +254,11 @@ class TestFrame(tk.Frame):
 
     # ------
 
-    def _sEntryModified(self, *_):
-        self.textEntry.config(width=len(self.sText.get()))
-        self.update()
+    def _textEntryModified(self, *_):
+        if self.sText.get():
+            self.textEntry.config(width=len(self.sText.get()))
+            self.update()
+            self._start_processing()
 
     # ------
 
@@ -244,12 +280,12 @@ class TestFrame(tk.Frame):
                         self.iInt += 1
                         if os.path.splitext(os.path.basename(f))[1].upper() in p_acceptedFormatS:
                             self.testResultList.append(f"{self.sText.get()} {f}")
-                            self._refresh_scrolledText()
+                            self._refresh_outputs()
                             await asyncio.sleep(0)
                             # SourceXML(os.path.join(p_sCurrentFolder, f))
                         else:
                             self.testResultList.append(f"{self.sText.get()} {f}")
-                            self._refresh_scrolledText()
+                            self._refresh_outputs()
                             await asyncio.sleep(0)
                     else:
                     # if it IS a folder
