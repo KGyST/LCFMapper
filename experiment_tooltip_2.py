@@ -7,7 +7,7 @@ class CreateToolTip:
     def __init__(self, widget, text='widget info', delay=500):
         self.waittime = delay  # Delay in milliseconds (default: 500ms)
         self.widget = widget
-        self.text = text
+        self.text = self._unindent(text)
 
         self.widget.bind("<Enter>", self.enter)
         self.widget.bind("<Leave>", self.leave)
@@ -143,38 +143,78 @@ class CreateToolTip:
         else:
             return False
 
-# Example usage
-root = tk.Tk()
+    @staticmethod
+    def _unindent(text: str) -> str:
+        """
+        Unindents the given text if every line starts with the same indentation.
 
-button = tk.Button(root, text="Button")
-button.pack()
+        Args:
+            text (str): The text to unindent.
 
-tooltip_text = """
-================
-Document Heading
-================
+        Returns:
+            str: The unindented text.
+        """
+        lines = text.split("\n")
+        indentation = None
 
-Heading
-=======
+        for line in lines:
+            if not line.strip():
+                continue
 
-Sub-heading
------------
+            line_indentation = len(line) - len(line.lstrip())
 
-This is a **bold** tooltip. *Italic Text*
+            if indentation is None:
+                indentation = line_indentation
+            elif line_indentation < indentation:
+                indentation = line_indentation
 
-Subheading
-----------
+        if indentation is not None and indentation > 0:
+            unindented_lines = [line[indentation:] for line in lines]
+            return "\n".join(unindented_lines)
 
-- Bullet 1
-- Bullet 2
+        return text
 
-An `example <http://example.com>`_.
 
-.. image:: ../NASA.png
-    :alt: Image
+class DummyButton(tk.Button):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if 'command' in kwargs:
+            _doc = kwargs["command"].__doc__
+            CreateToolTip(self, _doc)
 
-"""
+    @staticmethod
+    def startBtuttonDummyFunction():
+        """
+        ================
+        Document Heading
+        ================
 
-tooltip = CreateToolTip(button, text=tooltip_text)
+        Heading
+        =======
 
-root.mainloop()
+        Sub-heading
+        -----------
+
+        This is a **bold** tooltip. *Italic Text*
+
+        Subheading
+        ----------
+
+        - Bullet 1
+        - Bullet 2
+
+        An `example <http://example.com>`_.
+
+        .. image:: ../NASA.png
+            :alt: Image
+        """
+        print("startBtuttonFunction called")
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+
+    button = DummyButton(root, text="Button", command=DummyButton.startBtuttonDummyFunction)
+    button.pack()
+
+    root.mainloop()
