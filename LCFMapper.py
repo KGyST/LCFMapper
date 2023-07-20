@@ -6,8 +6,11 @@ Date: 2023-06-19
 Description:
 """
 # FIXME to provide an UI-filter showing, for example, which parameter exists in which macro
+# FIXME to create a config-loader either from .conf file or registry
 
 import os.path
+import time
+from io import StringIO
 from os import listdir
 import tempfile
 from subprocess import check_output
@@ -15,13 +18,15 @@ import shutil
 
 import tkinter as tk
 import tkinter.filedialog
-
+import asyncio
 from configparser import *  #FIXME not *
 
 import pip
 import multiprocessing as mp
 
-import asyncio
+from Undoable import *
+from Async import Loop
+from tkinter import scrolledtext
 
 try:
     from lxml import etree
@@ -107,6 +112,7 @@ class XLSXLoader:
                 for cell in row:
                     _v = cell.value
                     _row.append(_v)
+                _result.append(_row)
             return  _result
         except:
             print(_result)
@@ -156,29 +162,9 @@ class ParamMappingContainer:
 
 @singleton
 class GUIAppSingleton(tk.Frame):
-    @property
-    def iTotal(self):
-        return self._iTotal
-
-    @iTotal.setter
-    def iTotal(self, value):
-        self._iTotal = value
-        self.progressInfo.config(text=f"{self._iCurrent}/{self._iTotal}")
-
-    @property
-    def iCurrent(self):
-        return self._iCurrent
-
-    @iCurrent.setter
-    def iCurrent(self, value):
-        self._iCurrent = value
-        self.progressInfo.config(text=f"{self._iCurrent}/{self._iTotal}")
-
     def __init__(self):
-        super().__init__(self)
+        super().__init__()
         self.top = self.winfo_toplevel()
-
-        self.warnings = []
 
         self.currentConfig = ConfigParser()
         self.appDataDir  = os.getenv('APPDATA')
@@ -195,14 +181,18 @@ class GUIAppSingleton(tk.Frame):
         self.bDebug             = tk.BooleanVar()
         self.bCleanup           = tk.BooleanVar()
 
-        self.warnings = []
-
         # self.bo                 = None
         # self.googleSpreadsheet  = None
         # self.bWriteToSelf       = False             # Whether to write back to the file itself
+        # self.warnings = []
 
         self._iCurrent = 0
         self._iTotal = 0
+        self._sOutput = StringIO()
+        self._tick = time.perf_counter()
+        self._iCurrentLock = mp.Lock()
+        self._iTotalLock = mp.Lock()
+        self._lock = mp.Lock()
 
         try:
             for cName, cValue in self.currentConfig.items('ArchiCAD'):
@@ -228,94 +218,199 @@ class GUIAppSingleton(tk.Frame):
         except NoSectionError:
             print("NoSectionError")
 
-        self.warnings = []
-
         # GUI itself----------------------------------------------------------------------------------------------------
 
-        iF = 0
+        iR = 0
 
-        InputDirPlusText(self.top, "XLSX name", self.SourceXLSXPath, row=iF, func=tkinter.filedialog.askopenfilename, title="Select file", tooltip="Path of the .xlsx file that describes the conversion")
+        InputDirPlusText(self.top, "XLSX name", self.SourceXLSXPath, row=iR, func=tkinter.filedialog.askopenfilename, title="Select file", tooltip="Path of the .xlsx file that describes the conversion")
 
-        iF += 1
+        iR += 1
 
-        InputDirPlusText(self.top, "XML Source folder", self.SourceXMLDirName, row=iF, tooltip='Path of the folder where extracted .lcf file structure is')
+        self.textEntry = InputDirPlusText(self.top, "XML Source folder", self.SourceXMLDirName, row=iR, tooltip='Path of the folder where extracted .lcf file structure is')
 
-        iF += 1
+        iR += 1
 
-        InputDirPlusText(self.top, "Images' source folder", self.SourceImageDirName, row=iF, tooltip="Path of image folder that is the result of extractontainer 's -img switch, for encoded images")
+        InputDirPlusText(self.top, "Images' source folder", self.SourceImageDirName, row=iR, tooltip="Path of image folder that is the result of extractontainer 's -img switch, for encoded images")
 
-        iF += 1
+        iR += 1
 
-        # InputDirPlusText(self.top, "LCF Source path", self.TargetLCFPath, "LCF Source path", row=iF, func=tkinter.filedialog.askopenfilename, title="Select file")
+        # InputDirPlusText(self.top, "LCF Source path", self.TargetLCFPath, "LCF Source path", row=iR, func=tkinter.filedialog.askopenfilename, title="Select file")
 
-        # iF += 1
+        # iR += 1
 
-        InputDirPlusText(self.top, "LCF Destination path", self.TargetLCFPath, "LCF Destination path", row=iF, func=tkinter.filedialog.asksaveasfilename, title="Select file")
+        InputDirPlusText(self.top, "LCF Destination path", self.TargetLCFPath, "LCF Destination path", row=iR, func=tkinter.filedialog.asksaveasfilename, title="Select file")
 
-        iF += 1
+        iR += 1
 
-        InputDirPlusText(self.top, "ArchiCAD location",  self.ACLocation, "ArchiCAD location", row=iF)
+        InputDirPlusText(self.top, "ArchiCAD location",  self.ACLocation, "ArchiCAD location", row=iR)
 
-        iF += 1
+        iR += 1
 
         self.bottomFrame        = tk.Frame(self.top, )
-        self.bottomFrame.grid({"row":iF, "column": 0, "columnspan": 7, "sticky":  tk.S + tk.N, })
+        self.bottomFrame.grid({"row":iR, "sticky":  tk.S + tk.N, })
+
+        # Bottom row----------------------------------------------------------------------------------------------------
 
         iC = 0
 
-        self.startButton        = tk.Button(self.bottomFrame, {"text": "Start", "command": self.start})
-        self.startButton.grid({"row": 0, "column": iC, "sticky": tk.E}); iC += 1
-        CreateToolTip(self.startButton, "Start conversion")
+        self.buttonStart        = tk.Button(self.bottomFrame, {"text": "Start", "command": self.start})
+        self.buttonStart.grid({"row": 0, "column": iC, "sticky": tk.E})
+
+        iC += 1
+
+        CreateToolTip(self.buttonStart, "Start conversion")
 
         self.debugCheckButton   = tk.Checkbutton(self.bottomFrame, {"text": "Debug", "variable": self.bDebug})
-        self.debugCheckButton.grid({"row": 0, "column": iC}); iC += 1
+        self.debugCheckButton.grid({"row": 0, "column": iC})
+
+        iC += 1
+
         CreateToolTip(self.debugCheckButton, "Print out debug info")
 
         self.cleanupCheckButton   = tk.Checkbutton(self.bottomFrame, {"text": "Cleanup", "variable": self.bCleanup})
-        self.cleanupCheckButton.grid({"row": 0, "column": iC}); iC += 1
+        self.cleanupCheckButton.grid({"row": 0, "column": iC})
+
+        iC += 1
+
         CreateToolTip(self.cleanupCheckButton, "Delete temporary files after conversion")
 
-        iF += 1
+        iR += 1
 
-        self.progressInfo = tk.Label(self.top)
-        self.progressInfo.grid({"row": iF, "column": 0, "sticky": tk.W}); iC += 1
+        #/Bottom row----------------------------------------------------------------------------------------------------
 
+        self.scrolledText = scrolledtext.ScrolledText()
+        self.scrolledText.grid(row=0, column=1, rowspan=iR, sticky=tk.SE + tk.NW)
+
+        #           ----------------------------------------------------------------------------------------------------
+
+        self.progressInfo = tk.Label(self.top, text=f"{self.iCurrent} / {self.iTotal}")
+        self.progressInfo.grid({"row": iR, "column": 0, "sticky": tk.W}); iC += 1
+
+        self.top.protocol("WM_DELETE_WINDOW", self.writeConfigBack)
+
+        # self.trackedFieldS = self.sText, self.testResultList
+        Observer(self.SourceXMLDirName, self._sourceXMLDirModified)
+        # self.stateList = StateList(self.top, self._refresh_outputs, self.trackedFieldS)
+        self.task = None
+
+        self.loop = Loop(self.top)
+
+    def mainloop(self) -> None:
+        self.loop.run_forever()
+
+    def _sourceXMLDirModified(self, *_):
+        if self.SourceXMLDirName.get():
+            _ = self.tick
+            self.textEntry.config(width=len(self.SourceXMLDirName.get()))
+            # self.update()
+            self._start_source_xml_processing()
+
+    def _start_source_xml_processing(self):
+        self._cancel_source_xml_processing()
+        self.buttonStart.config(state=tk.DISABLED, text="Processing...")
+        self.textEntry.config(state=tk.DISABLED)
+        self.task = self.loop.create_task(self._process())
+        self.task.add_done_callback(self._end_of_xml_dir_processing)
+
+    def _cancel_source_xml_processing(self):
+        if self.task:
+            self.task.cancel()
+        self.task=None
+        self._iCurrent = 0
+        self._iTotal = 0
+
+    def _end_of_xml_dir_processing(self, task):
+        self.buttonStart.config(state=tk.NORMAL, text="Start")
+        self.textEntry.config(state=tk.NORMAL)
+        # self._refresh_outputs()
+        self.progressInfo.config(text=f"{self.iCurrent} / {self.iTotal} Scanning dirs took {self.tick:.2f} seconds")
+
+    def _end_of_conversion(self, task):
+        self.buttonStart.config(state=tk.NORMAL, text="Start")
+        self.textEntry.config(state=tk.NORMAL)
+        # self._refresh_outputs()
+        self.progressInfo.config(text=f"{self.iCurrent} / {self.iTotal} Conversion took {self.tick:.2f} seconds")
+
+    # def _refresh_outputs(self):
+    #     self.scrolledText.replace("1.0", "end", self._sOutput.getvalue())
+    #     self.scrolledText.see(tk.END)
+    #     # self.progressInfo.config(text=f"{self.iCurrent} / {self.iTotal}")
+
+    @property
+    def iTotal(self):
+        with self._iTotalLock:
+            return self._iTotal
+
+    @iTotal.setter
+    def iTotal(self, value):
+        with self._iTotalLock:
+            self._iTotal = value
+            self.progressInfo.config(text=f"{self.iCurrent} / {self._iTotal}")
+
+    @property
+    def iCurrent(self):
+        with self._iCurrentLock:
+            return self._iCurrent
+
+    @iCurrent.setter
+    def iCurrent(self, value):
+        with self._iCurrentLock:
+            self._iCurrent = value
+            self.progressInfo.config(text=f"{self._iCurrent} / {self.iTotal}")
+
+    @property
+    def tick(self):
+        _t = self._tick
+        self._tick = time.perf_counter()
+        return self._tick - _t
 
     @staticmethod
     def clear_data():
         DestXML.dest_dict.clear()
         DestXML.dest_sourcenames.clear()
-        SourceXML.replacement_dict.clear()
         DestXML.id_dict.clear()
         DestResource.pict_dict.clear()
 
+    def print(self, text:str):
+        with self._lock:
+            self._sOutput.write(f"{text}\n")
+            self.scrolledText.replace("1.0", "end", self._sOutput.getvalue())
+        self.scrolledText.see(tk.END)
+        print(text)
+
     def start(self):
-        self.startButton.setvar("state", "disabled")
-        # self._start()
-        asyncio.run(self._start())
-        print ("Starting conversion")
+        # self.buttonStart.setvar("state", "disabled")
+        self.buttonStart.config(state=tk.DISABLED, text="Processing...")
+        _ = self.tick
+        self.task = self.loop.create_task(self._start())
+        self.task.add_done_callback(self._end_of_conversion)
+
+        self.print("Starting conversion")
+
+    async def _process(self):
+        SourceXML.sSourceXMLDir = self.SourceXMLDirName.get()
+        SourceResource.sSourceResourceDir = self.SourceImageDirName.get()
+
+        await self.scanDirFactory(self.SourceXMLDirName.get(), current_folder='')
 
     async def _start(self):
         """
         :return:
         """
         self.clear_data()
+        message_queue = asyncio.Queue()
+        process_queue = asyncio.Queue()
 
-        # print ("Starting conversion")
         SourceXML.sSourceXMLDir = self.SourceXMLDirName.get()
         SourceResource.sSourceResourceDir = self.SourceImageDirName.get()
-
-        # await self.scanDirs(SourceXML.sSourceXMLDir)
-        # await self.scanDirs(SourceResource.sSourceResourceDir)
-        await asyncio.gather(self.scanDirs(SourceXML.sSourceXMLDir), self.scanDirs(SourceResource.sSourceResourceDir))
 
         tempDir = tempfile.mkdtemp()
         tempGDLDir = tempfile.mkdtemp()
         tempPicDir = tempfile.mkdtemp()  # For every image file, collected
 
-        print("tempDir: %s" % tempDir)
-        print("tempGDLDir: %s" % tempGDLDir)
-        print("tempPicDir: %s" % tempPicDir)
+        GUIAppSingleton().print("tempDir: %s" % tempDir)
+        GUIAppSingleton().print("tempGDLDir: %s" % tempGDLDir)
+        GUIAppSingleton().print("tempPicDir: %s" % tempPicDir)
 
         for sourceXML in SourceXML.replacement_dict.values():
             DestXML(sourceXML, DestXML.sDestXMLDir)
@@ -325,12 +420,28 @@ class GUIAppSingleton(tk.Frame):
 
         pool_map = [{"dest": DestXML.dest_dict[k],
                      "tempDir": tempDir,
+                     "message_queue": message_queue,
+                     "process_queue": process_queue,
                      } for k in list(DestXML.dest_dict.keys()) if
                     isinstance(DestXML.dest_dict[k], DestXML)]
         cpuCount = max(mp.cpu_count() - 1, 1)
 
         p = mp.Pool(processes=cpuCount)
         p.map(processOneXML, pool_map)
+        p.close()
+        p.join()
+
+        async def process_messages():
+            while not message_queue.empty():
+                message = await message_queue.get()
+                self.print(message)
+        await process_messages()
+
+        async def process_icurrent():
+            while not process_queue.empty():
+                message = await process_queue.get()
+                self.iCurrent += message
+        await process_icurrent()
 
         for f in list(DestResource.pict_dict.keys()):
             if DestResource.pict_dict[f].sourceFile.isEncodedImage:
@@ -356,8 +467,8 @@ class GUIAppSingleton(tk.Frame):
 
         if self.bDebug.get():
             # FIXME to JSON
-            print("x2l Command being executed...")
-            print(x2lCommand)
+            GUIAppSingleton().print("x2l Command being executed...")
+            GUIAppSingleton().print(x2lCommand)
             if not self.bCleanup.get():
                 with open(tempDir + "\dict.txt", "w") as d:
                     for k in list(DestXML.dest_dict.keys()):
@@ -382,63 +493,61 @@ class GUIAppSingleton(tk.Frame):
         tempGDLDir)
 
         if self.bDebug.get():
-            print("containerCommand Command being executed...")
-            print(containerCommand)
+            GUIAppSingleton().print("containerCommand Command being executed...")
+            GUIAppSingleton().print(containerCommand)
 
         check_output(containerCommand, shell=True)
 
         # cleanup ops
-        if not self.bCleanup.get():
+        if self.bCleanup.get():
             shutil.rmtree(tempDir)
             shutil.rmtree(tempPicDir)
         else:
-            print("tempDir: %s" % tempDir)
-            print("tempPicDir: %s" % tempPicDir)
+            GUIAppSingleton().print("tempDir: %s" % tempDir)
+            GUIAppSingleton().print("tempPicDir: %s" % tempPicDir)
 
-        print("*****FINISHED SUCCESFULLY******")
+        GUIAppSingleton().print("*****FINISHED SUCCESFULLY******")
 
-        self.startButton.setvar("state", "active")
+        self.buttonStart.setvar("state", "active")
 
-    async def scanDirs(self, p_sRootFolder, p_sCurrentFolder='', p_acceptedFormatS=(".XML",)):
+    async def scanDirFactory(self, root_folder, current_folder='', accepted_formats=(".XML",)):
         """
         only scanning input dir recursively to set up xml and image files' list
-        :param p_sRootFolder:
-        :param p_sCurrentFolder:
-        :param p_acceptedFormatS:
+        :param root_folder:
+        :param current_folder:
+        :param accepted_formats:
         :return:
         """
         try:
-            path_join = os.path.join(p_sRootFolder, p_sCurrentFolder)
-            for f in listdir(path_join):
+            for f in os.listdir(os.path.join(root_folder, current_folder)):
                 try:
-                    src = os.path.join(p_sRootFolder, p_sCurrentFolder, f)
-                    if not os.path.isdir(src):
+                    sRelPath = os.path.join(current_folder, f)
+                    if not os.path.isdir(os.path.join(root_folder, sRelPath)):
                     # if it IS NOT a folder
-                        GUIAppSingleton().iTotal += 1
-
-                        if os.path.splitext(os.path.basename(f))[1].upper() in p_acceptedFormatS:
-                            SourceXML(os.path.join(p_sCurrentFolder, f))
+                        self.iTotal += 1
+                        if os.path.splitext(os.path.basename(f))[1].upper() in accepted_formats:
+                            SourceXML(sRelPath)
                         else:
-                            # set up replacement dict for other files
                             if os.path.splitext(os.path.basename(f))[0].upper() not in SourceResource.source_pict_dict:
-                                sI = SourceResource(os.path.join(p_sCurrentFolder, f), p_sBasePath=p_sRootFolder)
-                                if SourceResource.sSourceResourceDir in sI.fullPath and SourceResource.sSourceResourceDir:
-                                    sI.isEncodedImage = True
+                                sR = SourceResource(sRelPath, base_path=root_folder)
+                                if SourceResource.sSourceResourceDir in sR.fullPath and SourceResource.sSourceResourceDir:
+                                    sR.isEncodedImage = True
+                        await asyncio.sleep(0)
                     else:
                     # if it IS a folder
-                        await self.scanDirs(p_sRootFolder, os.path.join(p_sCurrentFolder, f))
+                        await self.scanDirFactory(root_folder, sRelPath)
                 except KeyError:
-                    print("KeyError %s" % f)
+                    GUIAppSingleton().print("KeyError %s" % f)
                     continue
                 except etree.XMLSyntaxError:
-                    print("XMLSyntaxError %s" % f)
+                    GUIAppSingleton().print("XMLSyntaxError %s" % f)
                     continue
         except WindowsError:
             pass
 
     def writeConfigBack(self, ):
         # FIXME encrypting of sensitive data
-        if not self.bDebug:
+        if not self.bDebug.get():
             currentConfig = RawConfigParser()
             currentConfig.add_section("ArchiCAD")
             currentConfig.set("ArchiCAD", "sourcexlsxpath",     self.SourceXLSXPath.get())
@@ -466,12 +575,16 @@ class GUIAppSingleton(tk.Frame):
                 except UnicodeEncodeError:
                     #FIXME
                     pass
+        self.loop.stop()
         self.top.destroy()
 
 
-def processOneXML(p_Data):
-    dest = p_Data['dest']
-    tempDir = p_Data["tempDir"]
+def processOneXML(data):
+    dest = data['dest']
+    tempDir = data["tempDir"]
+    message_queue = data["message_queue"]
+    process_queue = data["process_queue"]
+
     mapping = ParamMappingContainer(GUIAppSingleton().SourceXLSXPath.get())
 
     src = dest.sourceFile
@@ -479,7 +592,10 @@ def processOneXML(p_Data):
     destPath = os.path.join(tempDir, dest.relPath)
     destDir = os.path.dirname(destPath)
 
-    print("%s -> %s" % (srcPath, destPath,))
+    # message_queue.put("%s -> %s" % (srcPath, destPath,))
+    async def update_message():
+        await message_queue.put("%s -> %s" % (srcPath, destPath,))
+    asyncio.run(update_message())
 
     mdp = etree.parse(srcPath, etree.XMLParser(strip_cdata=False))
 
@@ -498,14 +614,14 @@ def processOneXML(p_Data):
         pass
     with open(destPath, "wb") as file_handle:
         mdp.write(file_handle, pretty_print=True, encoding="UTF-8", xml_declaration=True, )
-    GUIAppSingleton().iCurrent += 1
+    # asyncio.run(process_queue.put(1))
+    async def update_iCurrent():
+        await process_queue.put(1)
+    asyncio.run(update_iCurrent())
 
-
-def main():
-    app = GUIAppSingleton()
-    app.top.protocol("WM_DELETE_WINDOW", app.writeConfigBack)
-    app.top.mainloop()
 
 if __name__ == "__main__":
-    main()
+    app = GUIAppSingleton()
+    # app.top.protocol("WM_DELETE_WINDOW", app.writeConfigBack)
+    app.mainloop()
 
