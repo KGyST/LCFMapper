@@ -132,7 +132,8 @@ class ParamMapping:
         self._paramDesc = p_row[_G_]
         self._from = p_row[_H_]
         self._to = p_row[_J_]
-
+        _folders = [f for f in p_row[:4] if f]
+        self._dirName = "\\".join(_folders)
 
 class ParamMappingContainer:
     def __init__(self, p_sXLSX:str):
@@ -150,9 +151,16 @@ class ParamMappingContainer:
                 if row[_J_]:
                     self._mappingList.append(ParamMapping(_paramType, row))
 
-    def applyParams(self, p_parSect, p_fileName):
+    def _isFileToBeProcessed(self, p_fileName:str, p_dirName:str, p_mapping:'ParamMapping')->bool:
+        if not p_mapping._files and p_mapping._dirName == p_dirName or not p_mapping._dirName\
+                or p_fileName in p_mapping._files:
+            return True
+        else:
+            return False
+
+    def applyParams(self, p_parSect, p_fileName, p_dirName):
         for mapping in self._mappingList:
-            if not mapping._files or p_fileName in mapping._files:
+            if self._isFileToBeProcessed(p_fileName, p_dirName, mapping):
                 params = p_parSect.getParamsByTypeNameAndValue(mapping._type, mapping._paramName, "", mapping._from)
                 for par in params:
                     par.value = mapping._to
@@ -650,7 +658,7 @@ def processOneXML(data):
         parPar = parRoot.getparent()
         parPar.remove(parRoot)
 
-        mapping.applyParams(dest.parameters, dest.name)
+        mapping.applyParams(dest.parameters, dest.name, dest.dirName)
 
         destPar = dest.parameters.toEtree()
         parPar.append(destPar)
