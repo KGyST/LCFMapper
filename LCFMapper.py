@@ -11,12 +11,10 @@ Description:
 import os.path
 import time
 from io import StringIO
-from os import listdir
 import tempfile
 from subprocess import check_output
 import shutil
 
-import tkinter as tk
 import tkinter.filedialog
 import asyncio
 from configparser import *  #FIXME not *
@@ -36,11 +34,11 @@ except ImportError:
 
 from GSMXMLLib import *
 from SamUITools import singleton, CreateToolTip, InputDirPlusText
+from Constants import *
 
 # FIXME Enums
 ID = ''
-LISTBOX_SEPARATOR = '--------'
-AC_18   = 28
+# AC_18   = 28
 SCRIPT_NAMES_LIST = ["Script_1D",
                      "Script_2D",
                      "Script_3D",
@@ -49,24 +47,6 @@ SCRIPT_NAMES_LIST = ["Script_1D",
                      "Script_VL",
                      "Script_FWM",
                      "Script_BWM",]
-
-PAR_UNKNOWN     = 0
-PAR_LENGTH      = 1
-PAR_ANGLE       = 2
-PAR_REAL        = 3
-PAR_INT         = 4
-PAR_BOOL        = 5
-PAR_STRING      = 6
-PAR_MATERIAL    = 7
-PAR_LINETYPE    = 8
-PAR_FILL        = 9
-PAR_PEN         = 10
-PAR_SEPARATOR   = 11
-PAR_TITLE       = 12
-PAR_BMAT        = 13
-PAR_PROF        = 14
-PAR_COMMENT     = 15
-# FIXME to handle unknown parameter types as string representations
 
 PARAM_TYPES = {
     'Pens':         PAR_PEN,
@@ -78,25 +58,9 @@ PARAM_TYPES = {
     'Integers':     PAR_INT,
 }
 
-PARFLG_CHILD    = 1
-PARFLG_BOLDNAME = 2
-PARFLG_UNIQUE   = 3
-PARFLG_HIDDEN   = 4
-
-# ------------------- GUI ------------------------------
-# ------------------- GUI ------------------------------
-# ------------------- GUI ------------------------------
-
 # ------------------- data classes -------------------------------------------------------------------------------------
 
 #----------------- mapping classes -------------------------------------------------------------------------------------
-
-_A_ =  0;   _B_ =  1;   _C_ =  2;   _D_ =  3;   _E_ =  4
-_F_ =  5;   _G_ =  6;   _H_ =  7;   _I_ =  8;   _J_ =  9
-_K_ = 10;   _L_ = 11;   _M_ = 12;   _N_ = 13;   _O_ = 14
-_P_ = 15;   _Q_ = 16;   _R_ = 17;   _S_ = 18;   _T_ = 19
-_U_ = 20;   _V_ = 21;   _W_ = 22;   _X_ = 23;   _Y_ = 24
-_Z_ = 25
 
 
 class XLSXLoader:
@@ -180,11 +144,6 @@ class GUIAppSingleton(tk.Frame):
         self.ACLocation = tk.StringVar()
         self.bDebug             = tk.BooleanVar()
         self.bCleanup           = tk.BooleanVar()
-
-        # self.bo                 = None
-        # self.googleSpreadsheet  = None
-        # self.bWriteToSelf       = False             # Whether to write back to the file itself
-        # self.warnings = []
 
         self._iCurrent = 0
         self._iTotal = 0
