@@ -2,6 +2,7 @@ import asyncio
 import multiprocessing
 import tkinter as tk
 
+
 class Loop:
     """
     A simple event loop class for tkinter applications.
@@ -28,37 +29,40 @@ class Loop:
 class Client(tk.Frame):
     def __init__(self, server_queue):
         super().__init__()
-        self.loop = Loop(self)
+        self.top = self.winfo_toplevel()
+        self.loop = Loop(self.top)
 
         self.text = tk.Text()
-        self.button = tk.Button(text="Send", command=self.on_send)
         self.text.pack()
-        self.button.pack()
 
-        self.server_queue = server_queue
+        self.server_queue = server_queue  # Change the type of the server_queue attribute
 
-    def on_send(self):
-        message = self.text.get("1.0", "end-1c")
-        print("Sending message:", message)
-        self.server_queue.put(message)  # Put the message in the server_queue
-
-    def mainloop(self) -> None:
+    def mainloop(self):
+        # server.start()  # Start the server process before starting the client process
+        self.loop.create_task(self._get_message())   # Get the message from the queue
         self.loop.run_forever()
+
+    async def _get_message(self):
+        while True:
+            message = await self.server_queue.get()  # Get the message from the server_queue
+            self.text.insert("end", f"{message}\n")  # Display the message in the client's text widget
 
 
 class Server(multiprocessing.Process):
     def __init__(self):
         super().__init__()
-        self._server_queue = multiprocessing.Queue()
+        self._server_queue = asyncio.Queue()
+        self.messages = ["Hello, world!", "This is a message from the server.", "Have a nice day!"]
 
     def run(self):
         loop = asyncio.get_event_loop()
-        loop.run_until_complete(self._run())
+        loop.create_task(self._run())
 
     async def _run(self):
         while True:
-            message = self.server_queue.get()  # Get the message from the server_queue
-            print("Received message:", message)
+            for message in self.messages:
+                await self._server_queue.put(message)  # Put the message in the server_queue
+                await asyncio.sleep(1)  # Wait 1 second before sending the next message
 
     @property
     def server_queue(self):
@@ -68,5 +72,5 @@ class Server(multiprocessing.Process):
 if __name__ == "__main__":
     server = Server()
     client = Client(server.server_queue)
-    server.start()
+    server.run()
     client.mainloop()
