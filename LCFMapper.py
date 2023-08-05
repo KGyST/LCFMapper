@@ -247,12 +247,14 @@ class GUIAppSingleton(tk.Frame):
 
         self.top.protocol("WM_DELETE_WINDOW", self.writeConfigBack)
 
-        # self.trackedFieldS = self.sText, self.testResultList
         Observer(self.SourceXMLDirName, self._sourceXMLDirModified)
-        # self.stateList = StateList(self.top, self._refresh_outputs, self.trackedFieldS)
         self.task = None
 
         self.loop = Loop(self.top)
+        self.message_queue = mp.Queue()
+        self.loop.create_task(self.process_messages())
+
+        # await self.process_messages()
 
     def mainloop(self) -> None:
         self.loop.run_forever()
@@ -352,13 +354,21 @@ class GUIAppSingleton(tk.Frame):
 
         await self.scanDirFactory(self.SourceXMLDirName.get(), current_folder='')
 
+    async def process_messages(self):
+        while True:
+            message = self.message_queue.get()
+            self.print(message)
+
+    # await process_messages()
+
     async def _start(self):
         """
         :return:
         """
         self.clear_data()
-        message_queue = asyncio.Queue()
-        process_queue = asyncio.Queue()
+
+        # message_queue = asyncio.Queue()
+        # process_queue = asyncio.Queue()
 
         SourceXML.sSourceXMLDir = self.SourceXMLDirName.get()
         SourceResource.sSourceResourceDir = self.SourceImageDirName.get()
@@ -379,8 +389,8 @@ class GUIAppSingleton(tk.Frame):
 
         pool_map = [{"dest": DestXML.dest_dict[k],
                      "tempDir": tempDir,
-                     "message_queue": message_queue,
-                     "process_queue": process_queue,
+                     # "message_queue": self.message_queue,
+                     # "process_queue": process_queue,
                      } for k in list(DestXML.dest_dict.keys()) if
                     isinstance(DestXML.dest_dict[k], DestXML)]
         cpuCount = max(mp.cpu_count() - 1, 1)
@@ -390,17 +400,12 @@ class GUIAppSingleton(tk.Frame):
         p.close()
         p.join()
 
-        async def process_messages():
-            while not message_queue.empty():
-                message = await message_queue.get()
-                self.print(message)
-        await process_messages()
 
-        async def process_icurrent():
-            while not process_queue.empty():
-                message = await process_queue.get()
-                self.iCurrent += message
-        await process_icurrent()
+        # async def process_icurrent():
+        #     while not process_queue.empty():
+        #         message = await process_queue.get()
+        #         self.iCurrent += message
+        # await process_icurrent()
 
         for f in list(DestResource.pict_dict.keys()):
             if DestResource.pict_dict[f].sourceFile.isEncodedImage:
@@ -541,8 +546,10 @@ class GUIAppSingleton(tk.Frame):
 def processOneXML(data):
     dest = data['dest']
     tempDir = data["tempDir"]
-    message_queue = data["message_queue"]
-    process_queue = data["process_queue"]
+    # message_queue = data["message_queue"]
+    message_queue = GUIAppSingleton().message_queue
+    # process_queue = data["process_queue"]
+
 
     mapping = ParamMappingContainer(GUIAppSingleton().SourceXLSXPath.get())
 
@@ -552,9 +559,10 @@ def processOneXML(data):
     destDir = os.path.dirname(destPath)
 
     # message_queue.put("%s -> %s" % (srcPath, destPath,))
-    async def update_message():
-        await message_queue.put("%s -> %s" % (srcPath, destPath,))
-    asyncio.run(update_message())
+    # async def update_message():
+    #     await message_queue.put("%s -> %s" % (srcPath, destPath,))
+    # asyncio.run(update_message())
+    message_queue.put("%s -> %s" % (srcPath, destPath,))
 
     mdp = etree.parse(srcPath, etree.XMLParser(strip_cdata=False))
 
@@ -574,9 +582,9 @@ def processOneXML(data):
     with open(destPath, "wb") as file_handle:
         mdp.write(file_handle, pretty_print=True, encoding="UTF-8", xml_declaration=True, )
     # asyncio.run(process_queue.put(1))
-    async def update_iCurrent():
-        await process_queue.put(1)
-    asyncio.run(update_iCurrent())
+    # async def update_iCurrent():
+    #     await process_queue.put(1)
+    # asyncio.run(update_iCurrent())
 
 
 if __name__ == "__main__":

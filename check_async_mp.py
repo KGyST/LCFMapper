@@ -26,7 +26,7 @@ class Loop:
 
 
 class Client(tk.Frame):
-    def __init__(self):
+    def __init__(self, server_queue):
         super().__init__()
         self.loop = Loop(self)
 
@@ -35,7 +35,7 @@ class Client(tk.Frame):
         self.text.pack()
         self.button.pack()
 
-        self.server_queue = multiprocessing.Queue()  # Use multiprocessing Queue
+        self.server_queue = server_queue
 
     def on_send(self):
         message = self.text.get("1.0", "end-1c")
@@ -45,10 +45,11 @@ class Client(tk.Frame):
     def mainloop(self) -> None:
         self.loop.run_forever()
 
+
 class Server(multiprocessing.Process):
-    def __init__(self, server_queue):
+    def __init__(self):
         super().__init__()
-        self.server_queue = server_queue
+        self._server_queue = multiprocessing.Queue()
 
     def run(self):
         loop = asyncio.get_event_loop()
@@ -59,10 +60,13 @@ class Server(multiprocessing.Process):
             message = self.server_queue.get()  # Get the message from the server_queue
             print("Received message:", message)
 
+    @property
+    def server_queue(self):
+        return self._server_queue
+
+
 if __name__ == "__main__":
-    server_queue = multiprocessing.Queue()  # Use multiprocessing Queue
-    client = Client()
-    server = Server(server_queue)
+    server = Server()
+    client = Client(server.server_queue)
     server.start()
-    client.server_queue = server_queue  # Pass the server_queue to the Client
     client.mainloop()
