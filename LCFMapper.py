@@ -35,6 +35,7 @@ except ImportError:
 from GSMXMLLib import *
 from SamUITools import singleton, CreateToolTip, InputDirPlusText
 from Constants import *
+from queue import Empty as QueueEmpty
 
 # FIXME Enums
 ID = ''
@@ -153,6 +154,8 @@ class GUIAppSingleton(tk.Frame):
         self._iTotalLock = mp.Lock()
         self._lock = mp.Lock()
 
+        self.cpuCount = max(mp.cpu_count() - 1, 1)
+
         try:
             for cName, cValue in self.currentConfig.items('ArchiCAD'):
                 try:
@@ -252,7 +255,7 @@ class GUIAppSingleton(tk.Frame):
 
         self.loop = Loop(self.top)
         self.message_queue = mp.Queue()
-        self.loop.create_task(self.process_messages())
+        self.async_queue = asyncio.Queue()
 
         # await self.process_messages()
 
@@ -344,6 +347,7 @@ class GUIAppSingleton(tk.Frame):
         self.buttonStart.config(state=tk.DISABLED, text="Processing...")
         _ = self.tick
         self.task = self.loop.create_task(self._start())
+        # self.loop.run_until_complete(self._start())
         self.task.add_done_callback(self._end_of_conversion)
 
         self.print("Starting conversion")
@@ -354,21 +358,32 @@ class GUIAppSingleton(tk.Frame):
 
         await self.scanDirFactory(self.SourceXMLDirName.get(), current_folder='')
 
-    async def process_messages(self):
+    async def mp_queue_to_async_queue(self):
         while True:
-            message = self.message_queue.get()
-            self.print(message)
+            try:
+                message = self.message_queue.get_nowait()
+                print('*************')
+                print(message)
+            except QueueEmpty:
+                await asyncio.sleep(0)
+                continue
+            # self.print(message)
+            await self.async_queue.put(message)
+            # if message is None:
+            #     break
 
-    # await process_messages()
+    async def print_out_async(self):
+        while True:
+            async_message = await self.async_queue.get()
+            if async_message is None:
+                break
+            self.print(async_message)
 
     async def _start(self):
         """
         :return:
         """
         self.clear_data()
-
-        # message_queue = asyncio.Queue()
-        # process_queue = asyncio.Queue()
 
         SourceXML.sSourceXMLDir = self.SourceXMLDirName.get()
         SourceResource.sSourceResourceDir = self.SourceImageDirName.get()
@@ -393,19 +408,15 @@ class GUIAppSingleton(tk.Frame):
                      # "process_queue": process_queue,
                      } for k in list(DestXML.dest_dict.keys()) if
                     isinstance(DestXML.dest_dict[k], DestXML)]
-        cpuCount = max(mp.cpu_count() - 1, 1)
 
-        p = mp.Pool(processes=cpuCount)
-        p.map(processOneXML, pool_map)
+        p = mp.Pool(processes=self.cpuCount, initializer=processOneXML, initargs=(self.message_queue))
+        # p.map(processOneXML, pool_map)
         p.close()
         p.join()
+        self.message_queue.put(None)
 
-
-        # async def process_icurrent():
-        #     while not process_queue.empty():
-        #         message = await process_queue.get()
-        #         self.iCurrent += message
-        # await process_icurrent()
+        self.loop.create_task(self.mp_queue_to_async_queue())
+        await self.print_out_async()
 
         for f in list(DestResource.pict_dict.keys()):
             if DestResource.pict_dict[f].sourceFile.isEncodedImage:
@@ -546,10 +557,8 @@ class GUIAppSingleton(tk.Frame):
 def processOneXML(data):
     dest = data['dest']
     tempDir = data["tempDir"]
-    # message_queue = data["message_queue"]
-    message_queue = GUIAppSingleton().message_queue
-    # process_queue = data["process_queue"]
-
+    message_queue = data["message_queue"]
+    # message_queue = GUIAppSingleton().message_queue
 
     mapping = ParamMappingContainer(GUIAppSingleton().SourceXLSXPath.get())
 
@@ -558,10 +567,7 @@ def processOneXML(data):
     destPath = os.path.join(tempDir, dest.relPath)
     destDir = os.path.dirname(destPath)
 
-    # message_queue.put("%s -> %s" % (srcPath, destPath,))
-    # async def update_message():
-    #     await message_queue.put("%s -> %s" % (srcPath, destPath,))
-    # asyncio.run(update_message())
+    print("%s -> %s" % (srcPath, destPath,))
     message_queue.put("%s -> %s" % (srcPath, destPath,))
 
     mdp = etree.parse(srcPath, etree.XMLParser(strip_cdata=False))
@@ -581,11 +587,6 @@ def processOneXML(data):
         pass
     with open(destPath, "wb") as file_handle:
         mdp.write(file_handle, pretty_print=True, encoding="UTF-8", xml_declaration=True, )
-    # asyncio.run(process_queue.put(1))
-    # async def update_iCurrent():
-    #     await process_queue.put(1)
-    # asyncio.run(update_iCurrent())
-
 
 if __name__ == "__main__":
     app = GUIAppSingleton()
