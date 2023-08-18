@@ -13,8 +13,9 @@ N_SEC = 1
 async_queue = asyncio.Queue()
 
 def worker_main(p_item):
-    mp_queue.put(f"{p_item[0]} - {os.getpid()}: {p_item[1]} sec")
+    print(f"{p_item[0]} - {os.getpid()}")
     time.sleep(p_item[1])
+    mp_queue.put(f"{p_item[0]} - {os.getpid()}: {p_item[1]} sec")
 
 def init_worker(queue):
     global mp_queue
