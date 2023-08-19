@@ -1,46 +1,62 @@
 import multiprocessing
+import os
+import time
 import asyncio
+import random
+from concurrent.futures import ProcessPoolExecutor
+from queue import Empty as QueueEmpty
 
-def process_function(x):
-    return x * 2
+N_PROCESSES = 8
+N_ITER = 20
+N_SEC = 1
 
-def server_function(queue, num_tasks):
-    pool = multiprocessing.Pool(processes=3)
-    results = pool.map(process_function, range(num_tasks))
-    pool.close()
-    pool.join()
+def worker_main(p_item, mp_queue):  # Pass mp_queue as an argument
+    print(f"{p_item[0]} - {os.getpid()}")
+    time.sleep(p_item[1])
+    mp_queue.put(f"{p_item[0]} - {os.getpid()}: {p_item[1]} sec")
 
-    for result in results:
-        print(f"Sent message: {result}")
-        queue.put(result)
+#--------------------------------------------------------------------
 
-async def client_function(queue):
+async_queue = asyncio.Queue()
+
+async def run(mp_queue):
+    asyncio.create_task(mp_queue_to_async_queue(mp_queue))  # Pass mp_queue as an argument
+    await print_out_async()
+
+async def mp_queue_to_async_queue(mp_queue):  # Receive mp_queue as an argument
     while True:
-        message = queue.get()
-        if message is None:
+        try:
+            message = mp_queue.get_nowait()
+        except QueueEmpty:
+            await asyncio.sleep(0)
+            continue
+        except BrokenPipeError:
             break
-        print(f"Received message: {message}")
-        await asyncio.sleep(0.1)
+        print(f"-> {message}")
+        await async_queue.put(message)
 
-if __name__ == "__main__":
-    queue = multiprocessing.Queue()
-    num_tasks = 10
+async def print_out_async():
+    processes_finished = 0
+    while True:
+        b = await async_queue.get()
+        print(f"<- {b}")
+        processes_finished += 1
+        if processes_finished == N_ITER:
+            break
 
-    # Start the server function in a separate process
-    server_process = multiprocessing.Process(target=server_function, args=(queue, num_tasks))
-    server_process.start()
+def worker_pool(mp_queue):  # Pass mp_queue as an argument
+    pool_map = [(i, N_SEC * random.random()) for i in range(N_ITER)]
+    with ProcessPoolExecutor(max_workers=N_PROCESSES) as executor:
+        for p_item in pool_map:
+            executor.submit(worker_main, p_item, mp_queue)
 
-    # Start the client function in an asyncio event loop
-    loop = asyncio.get_event_loop()
-    try:
-        client_task = loop.create_task(client_function(queue))
-        loop.run_until_complete(client_task)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        # Put None in the queue to signal the client to stop
-        queue.put(None)
-        loop.close()
+async def main():
+    with multiprocessing.Manager() as manager:
+        mp_queue = manager.Queue()
+        loop = asyncio.get_event_loop()
+        _task = loop.create_task(run(mp_queue))
+        loop.run_in_executor(None, worker_pool, mp_queue)
+        await _task
 
-    # Wait for the server process to finish
-    server_process.join()
+if __name__ == '__main__':
+    asyncio.run(main())
