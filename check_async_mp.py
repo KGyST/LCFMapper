@@ -41,7 +41,9 @@ async def print_out_async():
         b = await async_queue.get()
         print(f"<- {b}")
         processes_finished += 1
-        if processes_finished == N_ITER:
+        # if processes_finished == N_ITER:
+        #     break
+        if b is None:
             break
 
 def worker_pool(mp_queue):  # Pass mp_queue as an argument
@@ -49,6 +51,9 @@ def worker_pool(mp_queue):  # Pass mp_queue as an argument
     with ProcessPoolExecutor(max_workers=N_PROCESSES) as executor:
         for p_item in pool_map:
             executor.submit(worker_main, p_item, mp_queue)
+
+        executor.shutdown(wait=True)
+        mp_queue.put(None)
 
 async def main():
     with multiprocessing.Manager() as manager:

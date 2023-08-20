@@ -389,6 +389,8 @@ class GUIAppSingleton(tk.Frame):
         with ProcessPoolExecutor(max_workers=self.cpuCount) as executor:
             for p_item in pool_map:
                 executor.submit(processOneXML, p_item, self.message_queue)
+            executor.shutdown(wait=True)
+            self.message_queue.put(None)
 
     async def _start(self):
         """
@@ -415,8 +417,7 @@ class GUIAppSingleton(tk.Frame):
 
         self.loop.run_in_executor(None, self.worker_pool, tempDir)
 
-        _task = self.loop.create_task(self.run())
-        await _task
+        await self.loop.create_task(self.run())
 
         for f in list(DestResource.pict_dict.keys()):
             if DestResource.pict_dict[f].sourceFile.isEncodedImage:
