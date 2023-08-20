@@ -36,6 +36,7 @@ from GSMXMLLib import *
 from SamUITools import singleton, CreateToolTip, InputDirPlusText
 from Constants import *
 from queue import Empty as QueueEmpty
+from concurrent.futures import ProcessPoolExecutor
 
 # FIXME Enums
 ID = ''
@@ -254,7 +255,7 @@ class GUIAppSingleton(tk.Frame):
         self.task = None
 
         self.loop = Loop(self.top)
-        self.message_queue = mp.Queue()
+        self.message_queue = mp.Manager().Queue()
         self.async_queue = asyncio.Queue()
 
         # await self.process_messages()
@@ -362,15 +363,12 @@ class GUIAppSingleton(tk.Frame):
         while True:
             try:
                 message = self.message_queue.get_nowait()
-                print('*************')
-                print(message)
             except QueueEmpty:
                 await asyncio.sleep(0)
                 continue
-            # self.print(message)
+            except BrokenPipeError:
+                break
             await self.async_queue.put(message)
-            # if message is None:
-            #     break
 
     async def print_out_async(self):
         while True:
@@ -378,6 +376,19 @@ class GUIAppSingleton(tk.Frame):
             if async_message is None:
                 break
             self.print(async_message)
+
+    async def run(self):
+        self.loop.create_task(self.mp_queue_to_async_queue())
+        await self.print_out_async()
+
+    def worker_pool(self, tempDir):  # Pass mp_queue as an argument
+        pool_map = [{"dest": DestXML.dest_dict[k],
+                     "tempDir": tempDir,
+                     } for k in list(DestXML.dest_dict.keys()) if
+                    isinstance(DestXML.dest_dict[k], DestXML)]
+        with ProcessPoolExecutor(max_workers=self.cpuCount) as executor:
+            for p_item in pool_map:
+                executor.submit(processOneXML, p_item, self.message_queue)
 
     async def _start(self):
         """
@@ -392,9 +403,9 @@ class GUIAppSingleton(tk.Frame):
         tempGDLDir = tempfile.mkdtemp()
         tempPicDir = tempfile.mkdtemp()  # For every image file, collected
 
-        GUIAppSingleton().print("tempDir: %s" % tempDir)
-        GUIAppSingleton().print("tempGDLDir: %s" % tempGDLDir)
-        GUIAppSingleton().print("tempPicDir: %s" % tempPicDir)
+        self.print("tempDir: %s" % tempDir)
+        self.print("tempGDLDir: %s" % tempGDLDir)
+        self.print("tempPicDir: %s" % tempPicDir)
 
         for sourceXML in SourceXML.replacement_dict.values():
             DestXML(sourceXML, DestXML.sDestXMLDir)
@@ -402,21 +413,10 @@ class GUIAppSingleton(tk.Frame):
         for sourceResource in SourceResource.source_pict_dict.values():
             DestResource(sourceResource, tempPicDir if sourceResource.isEncodedImage else tempGDLDir)
 
-        pool_map = [{"dest": DestXML.dest_dict[k],
-                     "tempDir": tempDir,
-                     # "message_queue": self.message_queue,
-                     # "process_queue": process_queue,
-                     } for k in list(DestXML.dest_dict.keys()) if
-                    isinstance(DestXML.dest_dict[k], DestXML)]
+        self.loop.run_in_executor(None, self.worker_pool, tempDir)
 
-        p = mp.Pool(processes=self.cpuCount, initializer=processOneXML, initargs=(self.message_queue))
-        # p.map(processOneXML, pool_map)
-        p.close()
-        p.join()
-        self.message_queue.put(None)
-
-        self.loop.create_task(self.mp_queue_to_async_queue())
-        await self.print_out_async()
+        _task = self.loop.create_task(self.run())
+        await _task
 
         for f in list(DestResource.pict_dict.keys()):
             if DestResource.pict_dict[f].sourceFile.isEncodedImage:
@@ -512,10 +512,10 @@ class GUIAppSingleton(tk.Frame):
                     # if it IS a folder
                         await self.scanDirFactory(root_folder, sRelPath)
                 except KeyError:
-                    GUIAppSingleton().print("KeyError %s" % f)
+                    self.print("KeyError %s" % f)
                     continue
                 except etree.XMLSyntaxError:
-                    GUIAppSingleton().print("XMLSyntaxError %s" % f)
+                    self.print("XMLSyntaxError %s" % f)
                     continue
         except WindowsError:
             pass
@@ -554,12 +554,10 @@ class GUIAppSingleton(tk.Frame):
         self.top.destroy()
 
 
-def processOneXML(data):
-    dest = data['dest']
-    tempDir = data["tempDir"]
-    message_queue = data["message_queue"]
-    # message_queue = GUIAppSingleton().message_queue
-
+def processOneXML(p_data, p_messageQueue):
+    dest = p_data['dest']
+    tempDir = p_data["tempDir"]
+    # time.sleep(10)
     mapping = ParamMappingContainer(GUIAppSingleton().SourceXLSXPath.get())
 
     src = dest.sourceFile
@@ -567,8 +565,8 @@ def processOneXML(data):
     destPath = os.path.join(tempDir, dest.relPath)
     destDir = os.path.dirname(destPath)
 
+    p_messageQueue.put("%s -> %s" % (srcPath, destPath,))
     print("%s -> %s" % (srcPath, destPath,))
-    message_queue.put("%s -> %s" % (srcPath, destPath,))
 
     mdp = etree.parse(srcPath, etree.XMLParser(strip_cdata=False))
 
