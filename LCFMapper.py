@@ -36,7 +36,7 @@ from GSMXMLLib import *
 from SamUITools import singleton, CreateToolTip, InputDirPlusText
 from Constants import *
 from queue import Empty as QueueEmpty
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # FIXME Enums
 ID = ''
@@ -258,6 +258,9 @@ class GUIAppSingleton(tk.Frame):
         self.message_queue = mp.Manager().Queue()
         self.async_queue = asyncio.Queue()
 
+        self.loop.create_task(self.mp_queue_to_async_queue())
+        self.loop.create_task(self.print_out_async())
+
         # await self.process_messages()
 
     def mainloop(self) -> None:
@@ -295,11 +298,6 @@ class GUIAppSingleton(tk.Frame):
         self.textEntry.config(state=tk.NORMAL)
         # self._refresh_outputs()
         self.progressInfo.config(text=f"{self.iCurrent} / {self.iTotal} Conversion took {self.tick:.2f} seconds")
-
-    # def _refresh_outputs(self):
-    #     self.scrolledText.replace("1.0", "end", self._sOutput.getvalue())
-    #     self.scrolledText.see(tk.END)
-    #     # self.progressInfo.config(text=f"{self.iCurrent} / {self.iTotal}")
 
     @property
     def iTotal(self):
@@ -356,10 +354,12 @@ class GUIAppSingleton(tk.Frame):
     async def _process(self):
         SourceXML.sSourceXMLDir = self.SourceXMLDirName.get()
         SourceResource.sSourceResourceDir = self.SourceImageDirName.get()
-
         await self.scanDirFactory(self.SourceXMLDirName.get(), current_folder='')
 
     async def mp_queue_to_async_queue(self):
+        """
+        Puts messages from multiple processes to the async loop of UI to be printed out
+        """
         while True:
             try:
                 message = self.message_queue.get_nowait()
@@ -377,20 +377,18 @@ class GUIAppSingleton(tk.Frame):
                 break
             self.print(async_message)
 
-    async def run(self):
-        self.loop.create_task(self.mp_queue_to_async_queue())
-        await self.print_out_async()
-
-    def worker_pool(self, tempDir):  # Pass mp_queue as an argument
+    def worker_pool(self, tempXMLDir):
         pool_map = [{"dest": DestXML.dest_dict[k],
-                     "tempDir": tempDir,
+                     "tempXMLDir": tempXMLDir,
                      } for k in list(DestXML.dest_dict.keys()) if
                     isinstance(DestXML.dest_dict[k], DestXML)]
         with ProcessPoolExecutor(max_workers=self.cpuCount) as executor:
             for p_item in pool_map:
                 executor.submit(processOneXML, p_item, self.message_queue)
+
             executor.shutdown(wait=True)
-            self.message_queue.put(None)
+
+        self.message_queue.put(None)
 
     async def _start(self):
         """
@@ -401,11 +399,11 @@ class GUIAppSingleton(tk.Frame):
         SourceXML.sSourceXMLDir = self.SourceXMLDirName.get()
         SourceResource.sSourceResourceDir = self.SourceImageDirName.get()
 
-        tempDir = tempfile.mkdtemp()
+        tempXMLDir = tempfile.mkdtemp()
         tempGDLDir = tempfile.mkdtemp()
         tempPicDir = tempfile.mkdtemp()  # For every image file, collected
 
-        self.print("tempDir: %s" % tempDir)
+        self.print("tempXMLDir: %s" % tempXMLDir)
         self.print("tempGDLDir: %s" % tempGDLDir)
         self.print("tempPicDir: %s" % tempPicDir)
 
@@ -415,9 +413,7 @@ class GUIAppSingleton(tk.Frame):
         for sourceResource in SourceResource.source_pict_dict.values():
             DestResource(sourceResource, tempPicDir if sourceResource.isEncodedImage else tempGDLDir)
 
-        self.loop.run_in_executor(None, self.worker_pool, tempDir)
-
-        await self.loop.create_task(self.run())
+        await  self.loop.run_in_executor(None, self.worker_pool, tempXMLDir)
 
         for f in list(DestResource.pict_dict.keys()):
             if DestResource.pict_dict[f].sourceFile.isEncodedImage:
@@ -439,26 +435,26 @@ class GUIAppSingleton(tk.Frame):
                     shutil.copyfile(DestResource.pict_dict[f].sourceFile.fullPath,
                                     os.path.join(tempGDLDir, DestResource.pict_dict[f].relPath))
 
-        x2lCommand = '"%s" x2l -img "%s" "%s" "%s"' % (os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), self.SourceImageDirName.get(), tempDir, tempGDLDir)
+        x2lCommand = '"%s" x2l -img "%s" "%s" "%s"' % (os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), self.SourceImageDirName.get(), tempXMLDir, tempGDLDir)
 
         if self.bDebug.get():
             # FIXME to JSON
-            GUIAppSingleton().print("x2l Command being executed...")
-            GUIAppSingleton().print(x2lCommand)
+            self.print("x2l Command being executed...")
+            self.print(x2lCommand)
             if not self.bCleanup.get():
-                with open(tempDir + "\dict.txt", "w") as d:
+                with open(tempXMLDir + "\dict.txt", "w") as d:
                     for k in list(DestXML.dest_dict.keys()):
                         d.write(
                             k + " " + DestXML.dest_dict[k].sourceFile.name + "->" + DestXML.dest_dict[
                                 k].name + " " + DestXML.dest_dict[k].sourceFile.guid + " -> " +
                             DestXML.dest_dict[k].guid + "\n")
 
-                with open(tempDir + "\pict_dict.txt", "w") as d:
+                with open(tempXMLDir + "\pict_dict.txt", "w") as d:
                     for k in list(DestResource.pict_dict.keys()):
                         d.write(DestResource.pict_dict[k].sourceFile.fullPath + "->" + DestResource.pict_dict[
                             k].relPath + "\n")
 
-                with open(tempDir + "\id_dict.txt", "w") as d:
+                with open(tempXMLDir + "\id_dict.txt", "w") as d:
                     for k in list(DestXML.id_dict.keys()):
                         d.write(DestXML.id_dict[k] + "\n")
 
@@ -469,20 +465,20 @@ class GUIAppSingleton(tk.Frame):
         tempGDLDir)
 
         if self.bDebug.get():
-            GUIAppSingleton().print("containerCommand Command being executed...")
-            GUIAppSingleton().print(containerCommand)
+            self.print("containerCommand Command being executed...")
+            self.print(containerCommand)
 
         check_output(containerCommand, shell=True)
 
         # cleanup ops
         if self.bCleanup.get():
-            shutil.rmtree(tempDir)
+            shutil.rmtree(tempXMLDir)
             shutil.rmtree(tempPicDir)
         else:
-            GUIAppSingleton().print("tempDir: %s" % tempDir)
-            GUIAppSingleton().print("tempPicDir: %s" % tempPicDir)
+            self.print("tempXMLDir: %s" % tempXMLDir)
+            self.print("tempPicDir: %s" % tempPicDir)
 
-        GUIAppSingleton().print("*****FINISHED SUCCESFULLY******")
+        self.print("*****FINISHED SUCCESFULLY******")
 
         self.buttonStart.setvar("state", "active")
 
@@ -523,6 +519,7 @@ class GUIAppSingleton(tk.Frame):
 
     def writeConfigBack(self, ):
         # FIXME encrypting of sensitive data
+        # TODO bdebug handling
         if not self.bDebug.get():
             currentConfig = RawConfigParser()
             currentConfig.add_section("ArchiCAD")
@@ -557,8 +554,8 @@ class GUIAppSingleton(tk.Frame):
 
 def processOneXML(p_data, p_messageQueue):
     dest = p_data['dest']
-    tempDir = p_data["tempDir"]
-    # time.sleep(10)
+    tempDir = p_data["tempXMLDir"]
+
     mapping = ParamMappingContainer(GUIAppSingleton().SourceXLSXPath.get())
 
     src = dest.sourceFile
@@ -567,7 +564,7 @@ def processOneXML(p_data, p_messageQueue):
     destDir = os.path.dirname(destPath)
 
     p_messageQueue.put("%s -> %s" % (srcPath, destPath,))
-    print("%s -> %s" % (srcPath, destPath,))
+    # print("%s -> %s" % (srcPath, destPath,))
 
     mdp = etree.parse(srcPath, etree.XMLParser(strip_cdata=False))
 
