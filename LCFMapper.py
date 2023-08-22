@@ -147,23 +147,30 @@ class ParamMappingContainer:
             except KeyError:
                 continue
 
+            _mappingList = []
             for row in _sheet[1:]:
                 if row[_J_]:
-                    self._mappingList.append(ParamMapping(_paramType, row))
+                    _mappingList.append(ParamMapping(_paramType, row))
+            self._mappingList.extend(reversed(_mappingList))
 
     def _isFileToBeProcessed(self, p_fileName:str, p_dirName:str, p_mapping:'ParamMapping')->bool:
-        if not p_mapping._files and p_mapping._dirName == p_dirName or not p_mapping._dirName\
+        if not p_mapping._files and p_mapping._dirName in p_dirName or not p_mapping._dirName\
                 or p_fileName in p_mapping._files:
             return True
         else:
             return False
 
     def applyParams(self, p_parSect, p_fileName, p_dirName):
+        _appliedParamSet = set()
         for mapping in self._mappingList:
             if self._isFileToBeProcessed(p_fileName, p_dirName, mapping):
                 params = p_parSect.getParamsByTypeNameAndValue(mapping._type, mapping._paramName, "", mapping._from)
                 for par in params:
-                    par.value = mapping._to
+                    if par not in _appliedParamSet:
+                        par.value = mapping._to
+                        _appliedParamSet.add(par)
+                    else:
+                        print(f"Tried to apply another conversion to parameter {par.name}: {mapping._from} -> {mapping._to}")
 
 
 #----------------- config classes -----------------------------------------------------------------------------------------
@@ -439,6 +446,9 @@ class GUIAppSingleton(tk.Frame):
 
         tempXMLDir = tempfile.mkdtemp()
         tempGDLDir = tempfile.mkdtemp()
+        tempGDLDir = os.path.join(tempGDLDir, "Archicad Library 26")
+        os.makedirs(tempGDLDir)
+
         tempPicDir = tempfile.mkdtemp()  # For every image file, collected
         DestXML.sDestXMLDir = tempXMLDir
 
@@ -460,10 +470,13 @@ class GUIAppSingleton(tk.Frame):
                     isinstance(DestXML.dest_dict[k], DestXML)]
         cpuCount = max(mp.cpu_count() - 1, 1)
 
-        p = mp.Pool(processes=cpuCount)
-        p.map(processOneXML, pool_map)
-        p.close()
-        p.join()
+        # p = mp.Pool(processes=cpuCount)
+        # p.map(processOneXML, pool_map)
+        # p.close()
+        # p.join()
+
+        for _p in pool_map:
+            processOneXML(_p)
 
         async def process_messages():
             while not message_queue.empty():
@@ -479,6 +492,7 @@ class GUIAppSingleton(tk.Frame):
 
         for f in list(DestResource.pict_dict.keys()):
             if DestResource.pict_dict[f].sourceFile.isEncodedImage:
+                #Now probably unused:
                 try:
                     shutil.copyfile(os.path.join(self.SourceImageDirName.get(),
                                                  DestResource.pict_dict[f].sourceFile.relPath),
@@ -509,41 +523,10 @@ class GUIAppSingleton(tk.Frame):
         GUIAppSingleton().print("x2l Command being executed...")
         GUIAppSingleton().print(x2lCommand)
 
-        # if self.bDebug.get():
-        #     # FIXME to JSON
-        #     if not self.bCleanup.get():
-        #         with open(tempXMLDir + "\dict.txt", "w") as d:
-        #             for k in list(DestXML.dest_dict.keys()):
-        #                 d.write(
-        #                     k + " " + DestXML.dest_dict[k].sourceFile.name + "->" + DestXML.dest_dict[
-        #                         k].name + " " + DestXML.dest_dict[k].sourceFile.guid + " -> " +
-        #                     DestXML.dest_dict[k].guid + "\n")
-        #
-        #         with open(tempXMLDir + "\pict_dict.txt", "w") as d:
-        #             for k in list(DestResource.pict_dict.keys()):
-        #                 d.write(DestResource.pict_dict[k].sourceFile.fullPath + "->" + DestResource.pict_dict[
-        #                     k].relPath + "\n")
-        #
-        #         with open(tempXMLDir + "\id_dict.txt", "w") as d:
-        #             for k in list(DestXML.id_dict.keys()):
-        #                 d.write(DestXML.id_dict[k] + "\n")
-
-        # check_output(x2lCommand, shell=True)
-
         result = subprocess.run([os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "x2l", "-img", self.SourceImageDirName.get(), tempXMLDir, tempGDLDir], capture_output=True, text=True, timeout=100)
 
         output = result.stdout
         print(output)
-
-        # containerCommand = '"%s" createcontainer "%s" "%s"' % (
-        # os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), self.TargetLCFPath.get(),
-        # tempGDLDir)
-
-        # if self.bDebug.get():
-        # GUIAppSingleton().print("containerCommand Command being executed...")
-        # GUIAppSingleton().print(containerCommand)
-
-        # check_output(containerCommand, shell=True)
 
         result = subprocess.run([os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "createcontainer",  self.TargetLCFPath.get(), tempGDLDir], capture_output=True, text=True, timeout=1000)
         output = result.stdout
@@ -636,9 +619,8 @@ class GUIAppSingleton(tk.Frame):
 def processOneXML(data):
     dest = data['dest']
     tempDir = data["tempXMLDir"]
-    message_queue = data["message_queue"]
-    process_queue = data["process_queue"]
 
+    # FIXME ParamMappingContainer is the same for all so move to the singleton:
     mapping = ParamMappingContainer(GUIAppSingleton().SourceXLSXPath.get())
 
     src = dest.sourceFile
@@ -646,32 +628,25 @@ def processOneXML(data):
     destPath = os.path.join(tempDir, dest.relPath)
     destDir = os.path.dirname(destPath)
 
-    # message_queue.put("%s -> %s" % (srcPath, destPath,))
-    async def update_message():
-        await message_queue.put("%s -> %s" % (srcPath, destPath,))
-    asyncio.run(update_message())
-
     mdp = etree.parse(srcPath, etree.XMLParser(strip_cdata=False))
 
-    if dest.bPlaceable:
-        parRoot = mdp.find("./ParamSection")
-        parPar = parRoot.getparent()
-        parPar.remove(parRoot)
+    parRoot = mdp.find("./ParamSection")
+    mapping.applyParams(dest.parameters, dest.name, dest.dirName)
+    destPar = dest.parameters.toEtree()
+    parRoot.getparent().replace(parRoot, destPar)
 
-        mapping.applyParams(dest.parameters, dest.name, dest.dirName)
-
-        destPar = dest.parameters.toEtree()
-        parPar.append(destPar)
     try:
         os.makedirs(destDir)
     except WindowsError:
         pass
-    with open(destPath, "wb") as file_handle:
-        mdp.write(file_handle, pretty_print=True, encoding="UTF-8", xml_declaration=True, )
-    # asyncio.run(process_queue.put(1))
-    async def update_iCurrent():
-        await process_queue.put(1)
-    asyncio.run(update_iCurrent())
+
+    with open(destPath, "w", encoding="utf-8-sig", newline="\n") as file_handle:
+        _xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
+        mdp_tostring = etree.tostring(mdp, pretty_print=True, encoding="UTF-8").decode("UTF-8")
+        _sXML = _xml_declaration + mdp_tostring
+        # mdp.write(file_handle, pretty_print=True, encoding="UTF-8", xml_declaration=False, )
+        file_handle.write(_sXML)
+    print ("%s -> %s" % (srcPath, destPath,))
 
 
 if __name__ == "__main__":
