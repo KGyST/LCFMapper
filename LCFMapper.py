@@ -64,6 +64,13 @@ PARAM_TYPES = {
 
 #----------------- mapping classes -------------------------------------------------------------------------------------
 
+_A_ =  0;   _B_ =  1;   _C_ =  2;   _D_ =  3;   _E_ =  4
+_F_ =  5;   _G_ =  6;   _H_ =  7;   _I_ =  8;   _J_ =  9
+_K_ = 10;   _L_ = 11;   _M_ = 12;   _N_ = 13;   _O_ = 14
+_P_ = 15;   _Q_ = 16;   _R_ = 17;   _S_ = 18;   _T_ = 19
+_U_ = 20;   _V_ = 21;   _W_ = 22;   _X_ = 23;   _Y_ = 24
+_Z_ = 25
+
 
 class XLSXLoader:
     def __init__(self, table_url:str):
@@ -92,12 +99,13 @@ class XLSXLoader:
 class ParamMapping:
     def __init__(self, p_iType:int, p_row):
         self._type = p_iType
-        self._files = str.split(p_row[_A_], ";") if p_row[_A_] else []
-        self._paramName = p_row[_B_]
-        self._paramDesc = p_row[_C_]
-        self._from = p_row[_D_]
-        self._to = p_row[_F_]
-
+        self._files = str.split(p_row[_E_], ";") if p_row[_E_] else []
+        self._paramName = p_row[_F_]
+        self._paramDesc = p_row[_G_]
+        self._from = p_row[_H_]
+        self._to = p_row[_J_]
+        _folders = [f for f in p_row[:4] if f]
+        self._dirName = "\\".join(_folders)
 
 class ParamMappingContainer:
     def __init__(self, p_sXLSX:str):
@@ -111,16 +119,31 @@ class ParamMappingContainer:
             except KeyError:
                 continue
 
+            _mappingList = []
             for row in _sheet[1:]:
-                self._mappingList.append(ParamMapping(_paramType, row))
+                if row[_J_]:
+                    _mappingList.append(ParamMapping(_paramType, row))
+            self._mappingList.extend(reversed(_mappingList))
 
+    def _isFileToBeProcessed(self, p_fileName:str, p_dirName:str, p_mapping:'ParamMapping')->bool:
+        if not p_mapping._files and p_mapping._dirName in p_dirName or not p_mapping._dirName\
+                or p_fileName in p_mapping._files:
+            return True
+        else:
+            return False
 
-    def applyParams(self, p_parSect, p_fileName):
+    def applyParams(self, p_parSect, p_fileName, p_dirName):
+        _appliedParamSet = set()
         for mapping in self._mappingList:
-            if not mapping._files or p_fileName in mapping._files:
-                params = p_parSect.getParamsByTypeNameAndValue(mapping._type, mapping._paramName, mapping._paramDesc, mapping._from)
+            if self._isFileToBeProcessed(p_fileName, p_dirName, mapping):
+                params = p_parSect.getParamsByTypeNameAndValue(mapping._type, mapping._paramName, "", mapping._from)
                 for par in params:
-                    par.value = mapping._to
+                    if par not in _appliedParamSet:
+                        par.value = mapping._to
+                        _appliedParamSet.add(par)
+                    else:
+                        print(f"Tried to apply another conversion to parameter {par.name}: {mapping._from} -> {mapping._to}")
+
 
 
 #----------------- gui classes -----------------------------------------------------------------------------------------
@@ -155,6 +178,7 @@ class GUIAppSingleton(tk.Frame):
         self._iTotalLock = mp.Lock()
         self._lock = mp.Lock()
 
+        # self.cpuCount = 1
         self.cpuCount = max(mp.cpu_count() - 1, 1)
 
         try:
@@ -261,8 +285,6 @@ class GUIAppSingleton(tk.Frame):
         self.loop.create_task(self.mp_queue_to_async_queue())
         self.loop.create_task(self.print_out_async())
 
-        # await self.process_messages()
-
     def mainloop(self) -> None:
         self.loop.run_forever()
 
@@ -354,6 +376,7 @@ class GUIAppSingleton(tk.Frame):
     async def _process(self):
         SourceXML.sSourceXMLDir = self.SourceXMLDirName.get()
         SourceResource.sSourceResourceDir = self.SourceImageDirName.get()
+
         await self.scanDirFactory(self.SourceXMLDirName.get(), current_folder='')
 
     async def mp_queue_to_async_queue(self):
@@ -401,7 +424,11 @@ class GUIAppSingleton(tk.Frame):
 
         tempXMLDir = tempfile.mkdtemp()
         tempGDLDir = tempfile.mkdtemp()
+        tempGDLDir = os.path.join(tempGDLDir, "Archicad Library 26")
+        os.makedirs(tempGDLDir)
+
         tempPicDir = tempfile.mkdtemp()  # For every image file, collected
+        DestXML.sDestXMLDir = tempXMLDir
 
         self.print("tempXMLDir: %s" % tempXMLDir)
         self.print("tempGDLDir: %s" % tempGDLDir)
@@ -417,6 +444,7 @@ class GUIAppSingleton(tk.Frame):
 
         for f in list(DestResource.pict_dict.keys()):
             if DestResource.pict_dict[f].sourceFile.isEncodedImage:
+                #Now probably unused:
                 try:
                     shutil.copyfile(os.path.join(self.SourceImageDirName.get(),
                                                  DestResource.pict_dict[f].sourceFile.relPath),
@@ -430,10 +458,17 @@ class GUIAppSingleton(tk.Frame):
                 try:
                     shutil.copyfile(DestResource.pict_dict[f].sourceFile.fullPath,
                                     os.path.join(tempGDLDir, DestResource.pict_dict[f].relPath))
+                    if self.bDebug.get():
+                        shutil.copyfile(DestResource.pict_dict[f].sourceFile.fullPath,
+                                        os.path.join(tempXMLDir, DestResource.pict_dict[f].relPath))
                 except IOError:
                     os.makedirs(os.path.join(tempGDLDir, DestResource.pict_dict[f].dirName))
                     shutil.copyfile(DestResource.pict_dict[f].sourceFile.fullPath,
                                     os.path.join(tempGDLDir, DestResource.pict_dict[f].relPath))
+                    if self.bDebug.get():
+                        os.makedirs(os.path.join(tempXMLDir, DestResource.pict_dict[f].dirName))
+                        shutil.copyfile(DestResource.pict_dict[f].sourceFile.fullPath,
+                                        os.path.join(tempXMLDir, DestResource.pict_dict[f].relPath))
 
         x2lCommand = '"%s" x2l -img "%s" "%s" "%s"' % (os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), self.SourceImageDirName.get(), tempXMLDir, tempGDLDir)
 
@@ -556,6 +591,7 @@ def processOneXML(p_data, p_messageQueue):
     dest = p_data['dest']
     tempDir = p_data["tempXMLDir"]
 
+    # FIXME ParamMappingContainer is the same for all so move to the singleton:
     mapping = ParamMappingContainer(GUIAppSingleton().SourceXLSXPath.get())
 
     src = dest.sourceFile
@@ -564,25 +600,27 @@ def processOneXML(p_data, p_messageQueue):
     destDir = os.path.dirname(destPath)
 
     p_messageQueue.put("%s -> %s" % (srcPath, destPath,))
-    # print("%s -> %s" % (srcPath, destPath,))
 
     mdp = etree.parse(srcPath, etree.XMLParser(strip_cdata=False))
 
-    if dest.bPlaceable:
-        parRoot = mdp.find("./ParamSection")
-        parPar = parRoot.getparent()
-        parPar.remove(parRoot)
+    parRoot = mdp.find("./ParamSection")
+    mapping.applyParams(dest.parameters, dest.name, dest.dirName)
+    destPar = dest.parameters.toEtree()	
+    parRoot.getparent().replace(parRoot, destPar)
 
-        mapping.applyParams(dest.parameters, dest.name)
-
-        destPar = dest.parameters.toEtree()
-        parPar.append(destPar)
     try:
         os.makedirs(destDir)
     except WindowsError:
         pass
-    with open(destPath, "wb") as file_handle:
-        mdp.write(file_handle, pretty_print=True, encoding="UTF-8", xml_declaration=True, )
+
+    with open(destPath, "w", encoding="utf-8-sig", newline="\n") as file_handle:
+        _xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
+        mdp_tostring = etree.tostring(mdp, pretty_print=True, encoding="UTF-8").decode("UTF-8")
+        _sXML = _xml_declaration + mdp_tostring
+        # mdp.write(file_handle, pretty_print=True, encoding="UTF-8", xml_declaration=False, )
+        file_handle.write(_sXML)
+    print ("%s -> %s" % (srcPath, destPath,))
+
 
 if __name__ == "__main__":
     app = GUIAppSingleton()
