@@ -145,7 +145,6 @@ class ParamMappingContainer:
                         print(f"Tried to apply another conversion to parameter {par.name}: {mapping._from} -> {mapping._to}")
 
 
-
 #----------------- gui classes -----------------------------------------------------------------------------------------
 
 
@@ -276,6 +275,7 @@ class GUIAppSingleton(tk.Frame):
         self.top.protocol("WM_DELETE_WINDOW", self.writeConfigBack)
 
         Observer(self.SourceXMLDirName, self._sourceXMLDirModified)
+        Observer(self.SourceXLSXPath, self._sourceXLSXPathModified)
         self.task = None
 
         self.loop = Loop(self.top)
@@ -285,8 +285,15 @@ class GUIAppSingleton(tk.Frame):
         self.loop.create_task(self.mp_queue_to_async_queue())
         self.loop.create_task(self.print_out_async())
 
+        self._startup()
+
+
     def mainloop(self) -> None:
         self.loop.run_forever()
+
+    def _startup(self):
+        self._sourceXMLDirModified()
+        self._sourceXLSXPathModified()
 
     def _sourceXMLDirModified(self, *_):
         if self.SourceXMLDirName.get():
@@ -294,6 +301,11 @@ class GUIAppSingleton(tk.Frame):
             self.textEntry.config(width=len(self.SourceXMLDirName.get()))
             # self.update()
             self._start_source_xml_processing()
+
+    def _sourceXLSXPathModified(self, *_):
+        _path = self.SourceXLSXPath.get()
+        if _path and os.path.isfile(_path):
+            self.paramMapping = ParamMappingContainer(_path)
 
     def _start_source_xml_processing(self):
         self._cancel_source_xml_processing()
@@ -376,7 +388,6 @@ class GUIAppSingleton(tk.Frame):
     async def _process(self):
         SourceXML.sSourceXMLDir = self.SourceXMLDirName.get()
         SourceResource.sSourceResourceDir = self.SourceImageDirName.get()
-
         await self.scanDirFactory(self.SourceXMLDirName.get(), current_folder='')
 
     async def mp_queue_to_async_queue(self):
@@ -402,6 +413,7 @@ class GUIAppSingleton(tk.Frame):
 
     def worker_pool(self, tempXMLDir):
         pool_map = [{"dest": DestXML.dest_dict[k],
+                     "mapping": self.paramMapping,
                      "tempXMLDir": tempXMLDir,
                      } for k in list(DestXML.dest_dict.keys()) if
                     isinstance(DestXML.dest_dict[k], DestXML)]
@@ -589,10 +601,11 @@ class GUIAppSingleton(tk.Frame):
 
 def processOneXML(p_data, p_messageQueue):
     dest = p_data['dest']
+    mapping = p_data['mapping']
     tempDir = p_data["tempXMLDir"]
 
     # FIXME ParamMappingContainer is the same for all so move to the singleton:
-    mapping = ParamMappingContainer(GUIAppSingleton().SourceXLSXPath.get())
+    # mapping = ParamMappingContainer(GUIAppSingleton().SourceXLSXPath.get())
 
     src = dest.sourceFile
     srcPath = src.fullPath
@@ -614,12 +627,12 @@ def processOneXML(p_data, p_messageQueue):
         pass
 
     with open(destPath, "w", encoding="utf-8-sig", newline="\n") as file_handle:
-        _xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
+        xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
         mdp_tostring = etree.tostring(mdp, pretty_print=True, encoding="UTF-8").decode("UTF-8")
-        _sXML = _xml_declaration + mdp_tostring
-        # mdp.write(file_handle, pretty_print=True, encoding="UTF-8", xml_declaration=False, )
-        file_handle.write(_sXML)
-    print ("%s -> %s" % (srcPath, destPath,))
+        sXML = xml_declaration + mdp_tostring
+        file_handle.write(sXML)
+
+    p_messageQueue.put ("%s -> %s" % (srcPath, destPath,))
 
 
 if __name__ == "__main__":
