@@ -7,6 +7,7 @@ Description:
 """
 # FIXME to provide an UI-filter showing, for example, which parameter exists in which macro
 # FIXME to create a config-loader either from .conf file or registry
+# FIXME logging
 
 import os.path
 import time
@@ -170,7 +171,7 @@ class ParamMappingContainer:
                         par.value = mapping._to
                         _appliedParamSet.add(par)
                     else:
-                        print(f"Tried to apply another conversion to parameter {par.name}: {mapping._from} -> {mapping._to}")
+                        GUIAppSingleton().print(f"Tried to apply another conversion to parameter {par.name}: {mapping._from} -> {mapping._to}")
 
 
 #----------------- config classes -----------------------------------------------------------------------------------------
@@ -257,6 +258,7 @@ class GUIAppSingleton(tk.Frame):
         self._iCurrentLock = mp.Lock()
         self._iTotalLock = mp.Lock()
         self._lock = mp.Lock()
+        self._log=""
 
         # GUI itself----------------------------------------------------------------------------------------------------
 
@@ -415,6 +417,7 @@ class GUIAppSingleton(tk.Frame):
         with self._lock:
             self._sOutput.write(f"{text}\n")
             self.scrolledText.replace("1.0", "end", self._sOutput.getvalue())
+            self._log += text + "\n"
         self.scrolledText.see(tk.END)
         print(text)
 
@@ -446,7 +449,8 @@ class GUIAppSingleton(tk.Frame):
 
         tempXMLDir = tempfile.mkdtemp()
         tempGDLDir = tempfile.mkdtemp()
-        tempGDLDir = os.path.join(tempGDLDir, "Archicad Library 26")
+        # TODO AC version as a parameter
+        tempGDLDir = os.path.join(tempGDLDir, "Archicad Library 27")
         os.makedirs(tempGDLDir)
 
         tempPicDir = tempfile.mkdtemp()  # For every image file, collected
@@ -526,11 +530,11 @@ class GUIAppSingleton(tk.Frame):
         result = subprocess.run([os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "x2l", "-img", self.SourceImageDirName.get(), tempXMLDir, tempGDLDir], capture_output=True, text=True, timeout=100)
 
         output = result.stdout
-        print(output)
+        GUIAppSingleton().print(output)
 
         result = subprocess.run([os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "createcontainer",  self.TargetLCFPath.get(), tempGDLDir], capture_output=True, text=True, timeout=1000)
         output = result.stdout
-        print(output)
+        GUIAppSingleton().print(output)
 
         # cleanup ops
         if self.bCleanup.get():
@@ -539,6 +543,8 @@ class GUIAppSingleton(tk.Frame):
         else:
             GUIAppSingleton().print("tempXMLDir: %s" % tempXMLDir)
             GUIAppSingleton().print("tempPicDir: %s" % tempPicDir)
+            with open(os.path.join(tempGDLDir, "log.txt"), "w") as _file:
+                _file.write(self._log)
 
         GUIAppSingleton().print("*****FINISHED SUCCESFULLY******")
 
@@ -646,7 +652,7 @@ def processOneXML(data):
         _sXML = _xml_declaration + mdp_tostring
         # mdp.write(file_handle, pretty_print=True, encoding="UTF-8", xml_declaration=False, )
         file_handle.write(_sXML)
-    print ("%s -> %s" % (srcPath, destPath,))
+    GUIAppSingleton().print("%s -> %s" % (srcPath, destPath,))
 
 
 if __name__ == "__main__":
