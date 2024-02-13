@@ -65,19 +65,24 @@ PAR_FILL        = 9
 PAR_PEN         = 10
 PAR_SEPARATOR   = 11
 PAR_TITLE       = 12
-PAR_BMAT        = 13
-PAR_PROF        = 14
-PAR_COMMENT     = 15
+PAR_LIGHTSW     = 13
+PAR_COLORRGB    = 14
+PAR_INTENSITY   = 15
+PAR_BMAT        = 16
+PAR_PROF        = 17
+PAR_DICT        = 18
+PAR_COMMENT     = 19
 # FIXME to handle unknown parameter types as string representations
 
 PARAM_TYPES = {
-    'Pens':         PAR_PEN,
-    'Fills':        PAR_FILL,
-    'Linetypes':    PAR_LINETYPE,
-    'Surfaces':     PAR_MATERIAL,
-    'Strings':      PAR_STRING,
-    'Booleans':     PAR_BOOL,
-    'Integers':     PAR_INT,
+    'Pens':                 PAR_PEN,
+    'Fills':                PAR_FILL,
+    'Linetypes':            PAR_LINETYPE,
+    'Surfaces':             PAR_MATERIAL,
+    'Building Materials':   PAR_BMAT,
+    'Strings':              PAR_STRING,
+    'Booleans':             PAR_BOOL,
+    'Integers':             PAR_INT,
 }
 
 PARFLG_CHILD    = 1
@@ -543,6 +548,7 @@ class GUIAppSingleton(tk.Frame):
         else:
             GUIAppSingleton().print("tempXMLDir: %s" % tempXMLDir)
             GUIAppSingleton().print("tempPicDir: %s" % tempPicDir)
+            GUIAppSingleton().print("tempGDLDir: %s" % tempGDLDir)
             with open(os.path.join(tempGDLDir, "log.txt"), "w") as _file:
                 _file.write(self._log)
 
