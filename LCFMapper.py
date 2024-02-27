@@ -12,13 +12,10 @@ Description:
 import os.path
 import time
 from io import StringIO
-from os import listdir
 import tempfile
-from subprocess import check_output
 import subprocess
 import shutil
 
-import tkinter as tk
 import tkinter.filedialog
 import asyncio
 from configparser import *  #FIXME not *
@@ -122,7 +119,9 @@ class XLSXLoader:
                 _result.append(_row)
             return  _result
         except:
+            GUIAppSingleton().print("WARNING - Missing attribute type: %s" % sheet_name)
             print(_result)
+            raise
         # try:
         #     _result = [cell.value for cell in [row for row in self.wb[sheet_name]]]
         # except:
@@ -139,7 +138,7 @@ class ParamMapping:
         self._from = p_row[_H_]
         self._to = p_row[_J_]
         _folders = [f for f in p_row[:4] if f]
-        self._dirName = "\\".join(_folders)
+        self._dirName = os.sep.join(_folders)
 
 class ParamMappingContainer:
     def __init__(self, p_sXLSX:str):
@@ -341,6 +340,7 @@ class GUIAppSingleton(tk.Frame):
         self.task = None
 
         self.loop = Loop(self.top)
+        self._sourceXMLDirModified()
 
     def mainloop(self) -> None:
         self.loop.run_forever()
@@ -454,7 +454,7 @@ class GUIAppSingleton(tk.Frame):
 
         tempXMLDir = tempfile.mkdtemp()
         tempGDLDir = tempfile.mkdtemp()
-        # TODO AC version as a parameter
+        # FIXME AC version as a parameter
         tempGDLDir = os.path.join(tempGDLDir, "Archicad Library 27")
         os.makedirs(tempGDLDir)
 
