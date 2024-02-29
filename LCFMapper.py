@@ -8,6 +8,7 @@ Description:
 # FIXME to provide an UI-filter showing, for example, which parameter exists in which macro
 # FIXME to create a config-loader either from .conf file or registry
 # FIXME logging
+# FIXME {ACVERSION} for the sheets
 
 import os.path
 import time
@@ -35,6 +36,7 @@ except ImportError:
 
 from GSMXMLLib import *
 from SamUITools import singleton, CreateToolTip, InputDirPlusText
+from Config import *
 
 # FIXME Enums
 ID = ''
@@ -178,64 +180,6 @@ class ParamMappingContainer:
                         GUIAppSingleton().print(f"Tried to apply another conversion to parameter {par.name}: {mapping._from} -> {mapping._to}")
 
 
-#----------------- config classes -----------------------------------------------------------------------------------------
-
-@singleton
-class Config:
-    """
-    app_name:str="application" - application's own name
-    default_section:str=None
-    """
-    def __init__(self, app_name:str="application", default_section:str=None):
-        self._appName = app_name
-        self._currentConfig = ConfigParser()
-        self._defaultConfig = ConfigParser()
-
-        self.getConfigFromFile()
-        self.setCurrentSection(default_section)
-
-    def getConfigFromFile(self):
-        self.appDataDir = os.getenv('APPDATA')
-        if os.path.isfile(_fileName := (self._appName + ".ini")):
-            self._currentConfig.read(os.path.join(self.appDataDir, _fileName), encoding="UTF-8")
-        self._defaultConfig.read(_fileName, encoding="UTF-8")
-
-    def __getitem__(self, item):
-        if isinstance(item, tuple) or isinstance(item, list):
-            _sec = item[0]
-        else:
-            _sec = self._currentSection
-        try:
-            return self._currentConfig[_sec][item]
-        except:
-            return self._defaultConfig[_sec][item]
-        #         except NoOptionError:
-        #             print("NoOptionError")
-        #             continue
-        #         except NoSectionError:
-        #             print("NoSectionError")
-        #             continue
-        #         except ValueError:
-        #             print("ValueError")
-        #             continue
-
-    def __setitem__(self, key, value:str):
-        self._currentConfig[self._currentSection][key] = value
-
-    def setCurrentSection(self, section:str):
-        self._currentSection = section
-
-    def writeConfigBack(self, ):
-        with open(os.path.join(self.appDataDir, self._appName + ".ini"), 'w', encoding="UTF-8") as configFile:
-            try:
-                self._currentConfig.write(configFile)
-            except UnicodeEncodeError:
-                #FIXME
-                pass
-
-
-#-----------------/config classes -----------------------------------------------------------------------------------------
-
 #----------------- gui classes -----------------------------------------------------------------------------------------
 
 
@@ -243,6 +187,7 @@ class Config:
 class GUIAppSingleton(tk.Frame):
     def __init__(self):
         super().__init__()
+        self.top = self.winfo_toplevel()
         self.top = self.winfo_toplevel()
 
         self._currentConfig = Config("LCFMapper", "ArchiCAD")
