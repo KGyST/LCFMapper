@@ -379,12 +379,14 @@ class GUIAppSingleton(tk.Frame):
             self.print(async_message)
 
     def worker_pool(self, tempXMLDir):
+        cpuCount = max(mp.cpu_count() - 1, 1)
+
         pool_map = [{"dest": DestXML.dest_dict[k],
                      "mapping": self.paramMapping,
                      "tempXMLDir": tempXMLDir,
                      } for k in list(DestXML.dest_dict.keys()) if
                     isinstance(DestXML.dest_dict[k], DestXML)]
-        with ProcessPoolExecutor(max_workers=self.cpuCount) as executor:
+        with ProcessPoolExecutor(max_workers=cpuCount) as executor:
             for p_item in pool_map:
                 executor.submit(processOneXML, p_item, self.message_queue)
 
@@ -451,30 +453,30 @@ class GUIAppSingleton(tk.Frame):
 
         x2lCommand = '"%s" x2l -img "%s" "%s" "%s"' % (os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), self.SourceImageDirName.get(), tempXMLDir, tempGDLDir)
 
-        GUIAppSingleton().print("x2l Command being executed...")
-        GUIAppSingleton().print(x2lCommand)
+        self.print("x2l Command being executed..."),
+        self.print(x2lCommand)
 
         result = subprocess.run(
             [os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "x2l", "-img", self.SourceImageDirName.get(),
              tempXMLDir, tempGDLDir], capture_output=True, text=True, timeout=100)
 
         output = result.stdout
-        GUIAppSingleton().print(output)
+        self.print(output)
 
         result = subprocess.run(
             [os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "createcontainer", self.TargetLCFPath.get(),
              tempGDLDir], capture_output=True, text=True, timeout=1000)
         output = result.stdout
-        GUIAppSingleton().print(output)
+        self.print(output)
 
         # cleanup ops
         if self.bCleanup.get():
             shutil.rmtree(tempXMLDir)
             shutil.rmtree(tempPicDir)
         else:
-            GUIAppSingleton().print("tempXMLDir: %s" % tempXMLDir)
-            GUIAppSingleton().print("tempPicDir: %s" % tempPicDir)
-            GUIAppSingleton().print("tempGDLDir: %s" % tempGDLDir)
+            self.print("tempXMLDir: %s" % tempXMLDir)
+            self.print("tempPicDir: %s" % tempPicDir)
+            self.print("tempGDLDir: %s" % tempGDLDir)
             with open(os.path.join(tempGDLDir, "log.txt"), "w") as _file:
                 _file.write(self._log)
 
