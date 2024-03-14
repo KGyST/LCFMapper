@@ -578,7 +578,7 @@ def processOneXML(p_data, p_messageQueue):
 
     parRoot = mdp.find("./ParamSection")
     mapping.applyParams(dest.parameters, dest.name, dest.dirName)
-    destPar = dest.parameters.toEtree()	
+    destPar = dest.parameters.toEtree()
     parRoot.getparent().replace(parRoot, destPar)
 
     try:
