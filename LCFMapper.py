@@ -36,10 +36,10 @@ except ImportError:
 
 from GSMXMLLib import *
 from SamUITools import singleton, CreateToolTip, InputDirPlusText
+from Config import *
 from Constants import *
 from queue import Empty as QueueEmpty
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from Config import Config
 
 # FIXME Enums
 ID = ''
@@ -82,7 +82,7 @@ class XLSXLoader:
                 _result.append(_row)
             return  _result
         except:
-            GUIAppSingleton().print("WARNING - Missing attribute type: %s" % sheet_name)
+            # GUIAppSingleton().print("WARNING - Missing attribute type: %s" % sheet_name)
             print(_result)
             raise
         # try:
@@ -170,8 +170,6 @@ class GUIAppSingleton(tk.Frame):
         self._lock = mp.Lock()
         self._log=""
 
-        self.cpuCount = max(mp.cpu_count() - 1, 1)
-
         # GUI itself----------------------------------------------------------------------------------------------------
 
         iR = 0
@@ -242,16 +240,26 @@ class GUIAppSingleton(tk.Frame):
 
         self.top.protocol("WM_DELETE_WINDOW", self.writeConfigBack)
 
-        # self.trackedFieldS = self.sText, self.testResultList
         Observer(self.SourceXMLDirName, self._sourceXMLDirModified)
-        # self.stateList = StateList(self.top, self._refresh_outputs, self.trackedFieldS)
+        Observer(self.SourceXLSXPath, self._sourceXLSXPathModified)
         self.task = None
 
         self.loop = Loop(self.top)
-        self._sourceXMLDirModified()
+        self.message_queue = mp.Manager().Queue()
+        self.async_queue = asyncio.Queue()
+
+        self.loop.create_task(self.mp_queue_to_async_queue())
+        self.loop.create_task(self.print_out_async())
+
+        self._startup()
+
 
     def mainloop(self) -> None:
         self.loop.run_forever()
+
+    def _startup(self):
+        self._sourceXMLDirModified()
+        self._sourceXLSXPathModified()
 
     def _sourceXMLDirModified(self, *_):
         if self.SourceXMLDirName.get():
@@ -260,19 +268,10 @@ class GUIAppSingleton(tk.Frame):
             # self.update()
             self._start_source_xml_processing()
 
-    def worker_pool(self, tempXMLDir):
-        pool_map = [{"dest": DestXML.dest_dict[k],
-                     # "mapping": self.paramMapping,
-                     "tempXMLDir": tempXMLDir,
-                     } for k in list(DestXML.dest_dict.keys()) if
-                    isinstance(DestXML.dest_dict[k], DestXML)]
-        with ProcessPoolExecutor(max_workers=self.cpuCount) as executor:
-            for p_item in pool_map:
-                executor.submit(processOneXML, p_item)
-
-            executor.shutdown(wait=True)
-
-        self.message_queue.put(None)
+    def _sourceXLSXPathModified(self, *_):
+        _path = self.SourceXLSXPath.get()
+        if _path and os.path.isfile(_path):
+            self.paramMapping = ParamMappingContainer(_path)
 
     def _start_source_xml_processing(self):
         self._cancel_source_xml_processing()
@@ -348,6 +347,7 @@ class GUIAppSingleton(tk.Frame):
         self.buttonStart.config(state=tk.DISABLED, text="Processing...")
         _ = self.tick
         self.task = self.loop.create_task(self._start())
+        # self.loop.run_until_complete(self._start())
         self.task.add_done_callback(self._end_of_conversion)
 
         self.print("Starting conversion")
@@ -355,24 +355,57 @@ class GUIAppSingleton(tk.Frame):
     async def _process(self):
         SourceXML.sSourceXMLDir = self.SourceXMLDirName.get()
         SourceResource.sSourceResourceDir = self.SourceImageDirName.get()
-
         await self.scanDirFactory(self.SourceXMLDirName.get(), current_folder='')
+
+    async def mp_queue_to_async_queue(self):
+        """
+        Puts messages from multiple processes to the async loop of UI to be printed out
+        """
+        while True:
+            try:
+                message = self.message_queue.get_nowait()
+            except QueueEmpty:
+                await asyncio.sleep(0)
+                continue
+            except BrokenPipeError:
+                break
+            await self.async_queue.put(message)
+
+    async def print_out_async(self):
+        while True:
+            async_message = await self.async_queue.get()
+            if async_message is None:
+                break
+            self.print(async_message)
+
+    def worker_pool(self, tempXMLDir):
+        cpuCount = max(mp.cpu_count() - 1, 1)
+
+        pool_map = [{"dest": DestXML.dest_dict[k],
+                     "mapping": self.paramMapping,
+                     "tempXMLDir": tempXMLDir,
+                     } for k in list(DestXML.dest_dict.keys()) if
+                    isinstance(DestXML.dest_dict[k], DestXML)]
+        with ProcessPoolExecutor(max_workers=cpuCount) as executor:
+            for p_item in pool_map:
+                executor.submit(processOneXML, p_item, self.message_queue)
+
+            executor.shutdown(wait=True)
+
+        self.message_queue.put(None)
 
     async def _start(self):
         """
         :return:
         """
         self.clear_data()
-        message_queue = asyncio.Queue()
-        process_queue = asyncio.Queue()
 
         SourceXML.sSourceXMLDir = self.SourceXMLDirName.get()
         SourceResource.sSourceResourceDir = self.SourceImageDirName.get()
 
         tempXMLDir = tempfile.mkdtemp()
         tempGDLDir = tempfile.mkdtemp()
-        # FIXME AC version as a parameter
-        tempGDLDir = os.path.join(tempGDLDir, "Archicad Library 27")
+        tempGDLDir = os.path.join(tempGDLDir, "Archicad Library 26")
         os.makedirs(tempGDLDir)
 
         tempPicDir = tempfile.mkdtemp()  # For every image file, collected
@@ -420,15 +453,19 @@ class GUIAppSingleton(tk.Frame):
 
         x2lCommand = '"%s" x2l -img "%s" "%s" "%s"' % (os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), self.SourceImageDirName.get(), tempXMLDir, tempGDLDir)
 
-        self.print("x2l Command being executed...")
+        self.print("x2l Command being executed..."),
         self.print(x2lCommand)
 
-        result = subprocess.run([os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "x2l", "-img", self.SourceImageDirName.get(), tempXMLDir, tempGDLDir], capture_output=True, text=True, timeout=100)
+        result = subprocess.run(
+            [os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "x2l", "-img", self.SourceImageDirName.get(),
+             tempXMLDir, tempGDLDir], capture_output=True, text=True, timeout=100)
 
         output = result.stdout
         self.print(output)
 
-        result = subprocess.run([os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "createcontainer",  self.TargetLCFPath.get(), tempGDLDir], capture_output=True, text=True, timeout=1000)
+        result = subprocess.run(
+            [os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "createcontainer", self.TargetLCFPath.get(),
+             tempGDLDir], capture_output=True, text=True, timeout=1000)
         output = result.stdout
         self.print(output)
 
@@ -486,9 +523,12 @@ class GUIAppSingleton(tk.Frame):
         pass
 
     def writeConfigBack(self, ):
+        # FIXME encrypting of sensitive data
+        # TODO bdebug handling
         currentConfig = RawConfigParser()
         currentConfig.add_section("ArchiCAD")
         currentConfig.set("ArchiCAD", "bdebug", str(self.bDebug.get()))
+
         if not self.bDebug.get():
             currentConfig.set("ArchiCAD", "sourcexlsxpath",     self.SourceXLSXPath.get())
             currentConfig.set("ArchiCAD", "sourcedirname",      self.SourceXMLDirName.get())
@@ -519,17 +559,20 @@ class GUIAppSingleton(tk.Frame):
         self.top.destroy()
 
 
-def processOneXML(data):
-    dest = data['dest']
-    tempDir = data["tempXMLDir"]
+def processOneXML(p_data, p_messageQueue):
+    dest = p_data['dest']
+    mapping = p_data['mapping']
+    tempDir = p_data["tempXMLDir"]
 
     # FIXME ParamMappingContainer is the same for all so move to the singleton:
-    mapping = ParamMappingContainer(GUIAppSingleton().SourceXLSXPath.get())
+    # mapping = ParamMappingContainer(GUIAppSingleton().SourceXLSXPath.get())
 
     src = dest.sourceFile
     srcPath = src.fullPath
     destPath = os.path.join(tempDir, dest.relPath)
     destDir = os.path.dirname(destPath)
+
+    p_messageQueue.put("%s -> %s" % (srcPath, destPath,))
 
     mdp = etree.parse(srcPath, etree.XMLParser(strip_cdata=False))
 
@@ -544,12 +587,12 @@ def processOneXML(data):
         pass
 
     with open(destPath, "w", encoding="utf-8-sig", newline="\n") as file_handle:
-        _xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
+        xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
         mdp_tostring = etree.tostring(mdp, pretty_print=True, encoding="UTF-8").decode("UTF-8")
-        _sXML = _xml_declaration + mdp_tostring
-        # mdp.write(file_handle, pretty_print=True, encoding="UTF-8", xml_declaration=False, )
-        file_handle.write(_sXML)
-    GUIAppSingleton().print("%s -> %s" % (srcPath, destPath,))
+        sXML = xml_declaration + mdp_tostring
+        file_handle.write(sXML)
+
+    p_messageQueue.put ("%s -> %s" % (srcPath, destPath,))
 
 
 if __name__ == "__main__":
