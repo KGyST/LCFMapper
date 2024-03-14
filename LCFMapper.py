@@ -7,12 +7,14 @@ Description:
 """
 # FIXME to provide an UI-filter showing, for example, which parameter exists in which macro
 # FIXME to create a config-loader either from .conf file or registry
+# FIXME logging
+# FIXME {ACVERSION} for the sheets
 
 import os.path
 import time
 from io import StringIO
 import tempfile
-from subprocess import check_output
+import subprocess
 import shutil
 
 import tkinter.filedialog
@@ -34,6 +36,7 @@ except ImportError:
 
 from GSMXMLLib import *
 from SamUITools import singleton, CreateToolTip, InputDirPlusText
+from Config import *
 from Constants import *
 from queue import Empty as QueueEmpty
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -51,13 +54,14 @@ SCRIPT_NAMES_LIST = ["Script_1D",
                      "Script_BWM",]
 
 PARAM_TYPES = {
-    'Pens':         PAR_PEN,
-    'Fills':        PAR_FILL,
-    'Linetypes':    PAR_LINETYPE,
-    'Surfaces':     PAR_MATERIAL,
-    'Strings':      PAR_STRING,
-    'Booleans':     PAR_BOOL,
-    'Integers':     PAR_INT,
+    'Pens':                 PAR_PEN,
+    'Fills':                PAR_FILL,
+    'Linetypes':            PAR_LINETYPE,
+    'Surfaces':             PAR_MATERIAL,
+    'Building Materials':   PAR_BMAT,
+    'Strings':              PAR_STRING,
+    'Booleans':             PAR_BOOL,
+    'Integers':             PAR_INT,
 }
 
 #----------------- mapping classes -------------------------------------------------------------------------------------
@@ -78,7 +82,9 @@ class XLSXLoader:
                 _result.append(_row)
             return  _result
         except:
+            # GUIAppSingleton().print("WARNING - Missing attribute type: %s" % sheet_name)
             print(_result)
+            raise
         # try:
         #     _result = [cell.value for cell in [row for row in self.wb[sheet_name]]]
         # except:
@@ -95,7 +101,7 @@ class ParamMapping:
         self._from = p_row[_H_]
         self._to = p_row[_J_]
         _folders = [f for f in p_row[:4] if f]
-        self._dirName = "\\".join(_folders)
+        self._dirName = os.sep.join(_folders)
 
 class ParamMappingContainer:
     def __init__(self, p_sXLSX:str):
@@ -132,7 +138,7 @@ class ParamMappingContainer:
                         par.value = mapping._to
                         _appliedParamSet.add(par)
                     else:
-                        print(f"Tried to apply another conversion to parameter {par.name}: {mapping._from} -> {mapping._to}")
+                        GUIAppSingleton().print(f"Tried to apply another conversion to parameter {par.name}: {mapping._from} -> {mapping._to}")
 
 
 #----------------- gui classes -----------------------------------------------------------------------------------------
@@ -143,21 +149,17 @@ class GUIAppSingleton(tk.Frame):
     def __init__(self):
         super().__init__()
         self.top = self.winfo_toplevel()
+        self.top = self.winfo_toplevel()
 
-        self.currentConfig = ConfigParser()
-        self.appDataDir  = os.getenv('APPDATA')
-        if os.path.isfile(self.appDataDir  + r"\LCFMapper.ini"):
-            self.currentConfig.read(self.appDataDir  + r"\LCFMapper.ini", encoding="UTF-8")
-        else:
-            self.currentConfig.read("LCFMapper.ini", encoding="UTF-8")    #TODO into a different class or stg
+        self._currentConfig = Config("LCFMapper", "ArchiCAD")
 
-        self.SourceXMLDirName = tk.StringVar()
-        self.SourceXLSXPath = tk.StringVar()
-        self.TargetLCFPath = tk.StringVar()
-        self.SourceImageDirName = tk.StringVar()
-        self.ACLocation = tk.StringVar()
-        self.bDebug             = tk.BooleanVar()
-        self.bCleanup           = tk.BooleanVar()
+        self.SourceXLSXPath = tk.StringVar(self.top, self._currentConfig["sourcexlsxpath"])
+        self.SourceXMLDirName = tk.StringVar(self.top, self._currentConfig["sourcedirname"])
+        self.SourceImageDirName = tk.StringVar(self.top, self._currentConfig["inputimagesource"])
+        self.TargetLCFPath = tk.StringVar(self.top, self._currentConfig["targetlcfpath"])
+        self.ACLocation = tk.StringVar(self.top, self._currentConfig["aclocation"])
+        self.bDebug             = tk.BooleanVar(self.top, self._currentConfig["bdebug"] != "False")
+        self.bCleanup           = tk.BooleanVar(self.top, self._currentConfig["bcleanup"] != "False")
 
         self._iCurrent = 0
         self._iTotal = 0
@@ -166,33 +168,7 @@ class GUIAppSingleton(tk.Frame):
         self._iCurrentLock = mp.Lock()
         self._iTotalLock = mp.Lock()
         self._lock = mp.Lock()
-
-        # self.cpuCount = 1
-        self.cpuCount = max(mp.cpu_count() - 1, 1)
-
-        try:
-            for cName, cValue in self.currentConfig.items('ArchiCAD'):
-                try:
-                    if   cName == 'bdebug':             self.bDebug.set(cValue)
-                    elif cName == 'bcleanup':           self.bCleanup.set(cValue)
-                    elif cName == 'allkeywords':
-                        XMLFile.all_keywords |= set(v.strip() for v in cValue.split(',') if v !='')
-                    elif cName == 'aclocation':         self.ACLocation.set(cValue)
-                    elif cName == 'inputimagesource':   self.SourceImageDirName.set(cValue)
-                    elif cName == 'sourcedirname':      self.SourceXMLDirName.set(cValue)
-                    elif cName == 'sourcexlsxpath':     self.SourceXLSXPath.set(cValue)
-                    elif cName == 'targetlcfpath':      self.TargetLCFPath.set(cValue)
-                except NoOptionError:
-                    print("NoOptionError")
-                    continue
-                except NoSectionError:
-                    print("NoSectionError")
-                    continue
-                except ValueError:
-                    print("ValueError")
-                    continue
-        except NoSectionError:
-            print("NoSectionError")
+        self._log=""
 
         # GUI itself----------------------------------------------------------------------------------------------------
 
@@ -362,6 +338,7 @@ class GUIAppSingleton(tk.Frame):
         with self._lock:
             self._sOutput.write(f"{text}\n")
             self.scrolledText.replace("1.0", "end", self._sOutput.getvalue())
+            self._log += text + "\n"
         self.scrolledText.see(tk.END)
         print(text)
 
@@ -437,7 +414,7 @@ class GUIAppSingleton(tk.Frame):
         self.print("tempPicDir: %s" % tempPicDir)
 
         for sourceXML in SourceXML.replacement_dict.values():
-            DestXML(sourceXML, DestXML.sDestXMLDir)
+            DestXML(sourceXML)
 
         for sourceResource in SourceResource.source_pict_dict.values():
             DestResource(sourceResource, tempPicDir if sourceResource.isEncodedImage else tempGDLDir)
@@ -474,46 +451,32 @@ class GUIAppSingleton(tk.Frame):
 
         x2lCommand = '"%s" x2l -img "%s" "%s" "%s"' % (os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), self.SourceImageDirName.get(), tempXMLDir, tempGDLDir)
 
-        if self.bDebug.get():
-            # FIXME to JSON
-            self.print("x2l Command being executed...")
-            self.print(x2lCommand)
-            if not self.bCleanup.get():
-                with open(tempXMLDir + "\dict.txt", "w") as d:
-                    for k in list(DestXML.dest_dict.keys()):
-                        d.write(
-                            k + " " + DestXML.dest_dict[k].sourceFile.name + "->" + DestXML.dest_dict[
-                                k].name + " " + DestXML.dest_dict[k].sourceFile.guid + " -> " +
-                            DestXML.dest_dict[k].guid + "\n")
+        GUIAppSingleton().print("x2l Command being executed...")
+        GUIAppSingleton().print(x2lCommand)
 
-                with open(tempXMLDir + "\pict_dict.txt", "w") as d:
-                    for k in list(DestResource.pict_dict.keys()):
-                        d.write(DestResource.pict_dict[k].sourceFile.fullPath + "->" + DestResource.pict_dict[
-                            k].relPath + "\n")
+        result = subprocess.run(
+            [os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "x2l", "-img", self.SourceImageDirName.get(),
+             tempXMLDir, tempGDLDir], capture_output=True, text=True, timeout=100)
 
-                with open(tempXMLDir + "\id_dict.txt", "w") as d:
-                    for k in list(DestXML.id_dict.keys()):
-                        d.write(DestXML.id_dict[k] + "\n")
+        output = result.stdout
+        GUIAppSingleton().print(output)
 
-        check_output(x2lCommand, shell=True)
-
-        containerCommand = '"%s" createcontainer "%s" "%s"' % (
-        os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), self.TargetLCFPath.get(),
-        tempGDLDir)
-
-        if self.bDebug.get():
-            self.print("containerCommand Command being executed...")
-            self.print(containerCommand)
-
-        check_output(containerCommand, shell=True)
+        result = subprocess.run(
+            [os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "createcontainer", self.TargetLCFPath.get(),
+             tempGDLDir], capture_output=True, text=True, timeout=1000)
+        output = result.stdout
+        GUIAppSingleton().print(output)
 
         # cleanup ops
         if self.bCleanup.get():
             shutil.rmtree(tempXMLDir)
             shutil.rmtree(tempPicDir)
         else:
-            self.print("tempXMLDir: %s" % tempXMLDir)
-            self.print("tempPicDir: %s" % tempPicDir)
+            GUIAppSingleton().print("tempXMLDir: %s" % tempXMLDir)
+            GUIAppSingleton().print("tempPicDir: %s" % tempPicDir)
+            GUIAppSingleton().print("tempGDLDir: %s" % tempGDLDir)
+            with open(os.path.join(tempGDLDir, "log.txt"), "w") as _file:
+                _file.write(self._log)
 
         self.print("*****FINISHED SUCCESFULLY******")
 
@@ -554,37 +517,42 @@ class GUIAppSingleton(tk.Frame):
         except WindowsError:
             pass
 
+    def getConfig(self):
+        pass
+
     def writeConfigBack(self, ):
         # FIXME encrypting of sensitive data
         # TODO bdebug handling
+        currentConfig = RawConfigParser()
+        currentConfig.add_section("ArchiCAD")
+        currentConfig.set("ArchiCAD", "bdebug", str(self.bDebug.get()))
+
         if not self.bDebug.get():
-            currentConfig = RawConfigParser()
-            currentConfig.add_section("ArchiCAD")
             currentConfig.set("ArchiCAD", "sourcexlsxpath",     self.SourceXLSXPath.get())
             currentConfig.set("ArchiCAD", "sourcedirname",      self.SourceXMLDirName.get())
             currentConfig.set("ArchiCAD", "inputimagesource",   self.SourceImageDirName.get())
             currentConfig.set("ArchiCAD", "targetlcfpath",      self.TargetLCFPath.get())
             currentConfig.set("ArchiCAD", "aclocation",         self.ACLocation.get())
             currentConfig.set("ArchiCAD", "bcleanup",           str(self.bCleanup.get()))
-            currentConfig.set("ArchiCAD", "bdebug",             str(self.bDebug.get()))
             currentConfig.set("ArchiCAD", "allkeywords",        ', '.join(sorted(list(XMLFile.all_keywords))))
 
-            # if self.googleSpreadsheet:
-            #     currentConfig.add_section("GoogleSpreadsheetAPI")
-            #     currentConfig.set("GoogleSpreadsheetAPI", "access_token",   self.googleSpreadsheet.googleCreds.token)
-            #     currentConfig.set("GoogleSpreadsheetAPI", "refresh_token",  self.googleSpreadsheet.googleCreds.refresh_token)
-            #     currentConfig.set("GoogleSpreadsheetAPI", "id_token",       self.googleSpreadsheet.googleCreds.id_token)
-            #     currentConfig.set("GoogleSpreadsheetAPI", "token_uri",      self.googleSpreadsheet.googleCreds.token_uri)
-            #     currentConfig.set("GoogleSpreadsheetAPI", "client_id",      self.googleSpreadsheet.googleCreds.client_id)
-            #     currentConfig.set("GoogleSpreadsheetAPI", "client_secret",  self.googleSpreadsheet.googleCreds.client_secret)
+        # if self.googleSpreadsheet:
+        #     currentConfig.add_section("GoogleSpreadsheetAPI")
+        #     currentConfig.set("GoogleSpreadsheetAPI", "access_token",   self.googleSpreadsheet.googleCreds.token)
+        #     currentConfig.set("GoogleSpreadsheetAPI", "refresh_token",  self.googleSpreadsheet.googleCreds.refresh_token)
+        #     currentConfig.set("GoogleSpreadsheetAPI", "id_token",       self.googleSpreadsheet.googleCreds.id_token)
+        #     currentConfig.set("GoogleSpreadsheetAPI", "token_uri",      self.googleSpreadsheet.googleCreds.token_uri)
+        #     currentConfig.set("GoogleSpreadsheetAPI", "client_id",      self.googleSpreadsheet.googleCreds.client_id)
+        #     currentConfig.set("GoogleSpreadsheetAPI", "client_secret",  self.googleSpreadsheet.googleCreds.client_secret)
 
-            with open(os.path.join(self.appDataDir, "LCFMapper.ini"), 'w', encoding="UTF-8") as configFile:
-                #FIXME proper config place
-                try:
-                    currentConfig.write(configFile)
-                except UnicodeEncodeError:
-                    #FIXME
-                    pass
+        with open(os.path.join(os.getenv('APPDATA'), "LCFMapper.ini"), 'w', encoding="UTF-8") as configFile:
+            #FIXME proper config place
+            try:
+                currentConfig.write(configFile)
+            except UnicodeEncodeError:
+                #FIXME
+                pass
+
         self.loop.stop()
         self.top.destroy()
 
