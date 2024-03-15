@@ -11,22 +11,23 @@ Description:
 # FIXME {ACVERSION} for the sheets
 
 import os.path
+import shutil
+import tempfile
+
 import time
 from io import StringIO
-import tempfile
 import subprocess
-import shutil
+import pip
 
 import tkinter.filedialog
-import asyncio
+from tkinter import scrolledtext
+
 from configparser import *  #FIXME not *
 
-import pip
 import multiprocessing as mp
-
-from Undoable import *
-from Async import Loop
-from tkinter import scrolledtext
+import asyncio
+from queue import Empty as QueueEmpty
+from concurrent.futures import ProcessPoolExecutor
 
 try:
     from lxml import etree
@@ -35,34 +36,14 @@ except ImportError:
     from lxml import etree
 
 from GSMXMLLib import *
-from SamUITools import singleton, CreateToolTip, InputDirPlusText
+from SamUITools import CreateToolTip, InputDirPlusText
 from Config import *
 from Constants import *
-from queue import Empty as QueueEmpty
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from Undoable import *
+from Async import Loop
 
 # FIXME Enums
 ID = ''
-# AC_18   = 28
-SCRIPT_NAMES_LIST = ["Script_1D",
-                     "Script_2D",
-                     "Script_3D",
-                     "Script_PR",
-                     "Script_UI",
-                     "Script_VL",
-                     "Script_FWM",
-                     "Script_BWM",]
-
-PARAM_TYPES = {
-    'Pens':                 PAR_PEN,
-    'Fills':                PAR_FILL,
-    'Linetypes':            PAR_LINETYPE,
-    'Surfaces':             PAR_MATERIAL,
-    'Building Materials':   PAR_BMAT,
-    'Strings':              PAR_STRING,
-    'Booleans':             PAR_BOOL,
-    'Integers':             PAR_INT,
-}
 
 #----------------- mapping classes -------------------------------------------------------------------------------------
 
@@ -297,7 +278,7 @@ class GUIAppSingleton(tk.Frame):
         self.buttonStart.config(state=tk.NORMAL, text="Start")
         self.textEntry.config(state=tk.NORMAL)
         # self._refresh_outputs()
-        self.progressInfo.config(text=f"{self.iCurrent} / {self.iTotal} Conversion took {self.tick:.2f} seconds")
+        self.progressInfo.config(text=f"Conversion of {self.iTotal} objects took {self.tick:.2f} seconds")
 
     @property
     def iTotal(self):
@@ -458,14 +439,14 @@ class GUIAppSingleton(tk.Frame):
 
         result = subprocess.run(
             [os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "x2l", "-img", self.SourceImageDirName.get(),
-             tempXMLDir, tempGDLDir], capture_output=True, text=True, timeout=100)
+             tempXMLDir, tempGDLDir], capture_output=True, text=True, timeout=100, encoding="utf-8")
 
         output = result.stdout
         self.print(output)
 
         result = subprocess.run(
             [os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "createcontainer", self.TargetLCFPath.get(),
-             tempGDLDir], capture_output=True, text=True, timeout=1000)
+             tempGDLDir], capture_output=True, text=True, timeout=1000, encoding="utf-8")
         output = result.stdout
         self.print(output)
 
