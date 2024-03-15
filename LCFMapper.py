@@ -458,14 +458,14 @@ class GUIAppSingleton(tk.Frame):
 
         result = subprocess.run(
             [os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "x2l", "-img", self.SourceImageDirName.get(),
-             tempXMLDir, tempGDLDir], capture_output=True, text=True, timeout=100)
+             tempXMLDir, tempGDLDir], capture_output=True, text=True, timeout=100, encoding="utf-8")
 
         output = result.stdout
         self.print(output)
 
         result = subprocess.run(
             [os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "createcontainer", self.TargetLCFPath.get(),
-             tempGDLDir], capture_output=True, text=True, timeout=1000)
+             tempGDLDir], capture_output=True, text=True, timeout=1000, encoding="utf-8")
         output = result.stdout
         self.print(output)
 
