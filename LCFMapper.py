@@ -75,12 +75,12 @@ class XLSXLoader:
 
 class ParamMapping:
     def __init__(self, p_iType:int, p_row):
-        self._type = p_iType
+        self._iType = p_iType
         self._files = str.split(p_row[_E_], ";") if p_row[_E_] else []
         self._paramName = p_row[_F_]
         self._paramDesc = p_row[_G_]
-        self._from = p_row[_H_]
-        self._to = p_row[_J_]
+        self.from_ = p_row[_H_]
+        self.to_ = p_row[_J_]
         _folders = [f for f in p_row[:4] if f]
         self._dirName = os.sep.join(_folders)
 
@@ -102,24 +102,26 @@ class ParamMappingContainer:
                     _mappingList.append(ParamMapping(_paramType, row))
             self._mappingList.extend(reversed(_mappingList))
 
-    def _isFileToBeProcessed(self, p_fileName:str, p_dirName:str, p_mapping:'ParamMapping')->bool:
-        if not p_mapping._files and p_mapping._dirName in p_dirName or not p_mapping._dirName\
-                or p_fileName in p_mapping._files:
+    def _isFileToBeProcessed(self, file_name:str, dir_name:str, mapping: 'ParamMapping')->bool:
+        if not mapping._files and mapping._dirName in dir_name or not mapping._dirName\
+                or file_name in mapping._files:
             return True
         else:
             return False
 
-    def applyParams(self, p_parSect, p_fileName, p_dirName):
+    def applyParams(self, param_sect, file_name:str, dir_name:str):
         _appliedParamSet = set()
         for mapping in self._mappingList:
-            if self._isFileToBeProcessed(p_fileName, p_dirName, mapping):
-                params = p_parSect.getParamsByTypeNameAndValue(mapping._type, mapping._paramName, "", mapping._from)
+            if self._isFileToBeProcessed(file_name, dir_name, mapping):
+                params = param_sect.getParamsByTypeNameAndValue(mapping._iType, mapping._paramName, "", mapping.from_)
                 for par in params:
-                    if par not in _appliedParamSet:
-                        par.value = mapping._to
-                        _appliedParamSet.add(par)
-                    else:
-                        GUIAppSingleton().print(f"Tried to apply another conversion to parameter {par.name}: {mapping._from} -> {mapping._to}")
+                    for parID in par.getHashableIDs():
+                        if parID not in _appliedParamSet:
+                            # par.value = mapping._to
+                            par.setValueByPath(parID, mapping.to_)
+                            _appliedParamSet.add(parID)
+                        else:
+                            GUIAppSingleton().print(f"Tried to apply another conversion to parameter {par.name}: {mapping.from_} -> {mapping.to_}")
 
 
 #----------------- gui classes -----------------------------------------------------------------------------------------
@@ -277,7 +279,6 @@ class GUIAppSingleton(tk.Frame):
     def _end_of_conversion(self, task):
         self.buttonStart.config(state=tk.NORMAL, text="Start")
         self.textEntry.config(state=tk.NORMAL)
-        # self._refresh_outputs()
         self.progressInfo.config(text=f"Conversion of {self.iTotal} objects took {self.tick:.2f} seconds")
 
     @property
@@ -324,11 +325,9 @@ class GUIAppSingleton(tk.Frame):
         print(text)
 
     def start(self):
-        # self.buttonStart.setvar("state", "disabled")
         self.buttonStart.config(state=tk.DISABLED, text="Processing...")
         _ = self.tick
         self.task = self.loop.create_task(self._start())
-        # self.loop.run_until_complete(self._start())
         self.task.add_done_callback(self._end_of_conversion)
 
         self.print("Starting conversion")
@@ -361,6 +360,7 @@ class GUIAppSingleton(tk.Frame):
 
     def worker_pool(self, tempXMLDir):
         cpuCount = max(mp.cpu_count() - 1, 1)
+        cpuCount = 1
 
         pool_map = [{"dest": DestXML.dest_dict[k],
                      "mapping": self.paramMapping,
