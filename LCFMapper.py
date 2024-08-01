@@ -29,6 +29,8 @@ import asyncio
 from queue import Empty as QueueEmpty
 from concurrent.futures import ProcessPoolExecutor
 
+MULTI_PROCESS = False
+
 try:
     from lxml import etree
 except ImportError:
@@ -84,6 +86,7 @@ class ParamMapping:
         _folders = [f for f in p_row[:4] if f]
         self._dirName = os.sep.join(_folders)
 
+
 class ParamMappingContainer:
     def __init__(self, p_sXLSX:str):
         self._mappingList = []
@@ -131,7 +134,6 @@ class ParamMappingContainer:
 class GUIAppSingleton(tk.Frame):
     def __init__(self):
         super().__init__()
-        self.top = self.winfo_toplevel()
         self.top = self.winfo_toplevel()
 
         self._currentConfig = Config("LCFMapper", "ArchiCAD")
@@ -235,7 +237,6 @@ class GUIAppSingleton(tk.Frame):
         self.loop.create_task(self.print_out_async())
 
         self._startup()
-
 
     def mainloop(self) -> None:
         self.loop.run_forever()
@@ -360,7 +361,6 @@ class GUIAppSingleton(tk.Frame):
 
     def worker_pool(self, tempXMLDir):
         cpuCount = max(mp.cpu_count() - 1, 1)
-        cpuCount = 1
 
         pool_map = [{"dest": DestXML.dest_dict[k],
                      "mapping": self.paramMapping,
@@ -370,9 +370,7 @@ class GUIAppSingleton(tk.Frame):
         with ProcessPoolExecutor(max_workers=cpuCount) as executor:
             for p_item in pool_map:
                 executor.submit(processOneXML, p_item, self.message_queue)
-
             executor.shutdown(wait=True)
-
         self.message_queue.put(None)
 
     async def _start(self):
@@ -402,7 +400,15 @@ class GUIAppSingleton(tk.Frame):
         for sourceResource in SourceResource.source_pict_dict.values():
             DestResource(sourceResource, tempPicDir if sourceResource.isEncodedImage else tempGDLDir)
 
-        await  self.loop.run_in_executor(None, self.worker_pool, tempXMLDir)
+        if MULTI_PROCESS:
+            await  self.loop.run_in_executor(None, self.worker_pool, tempXMLDir)
+        else:
+            for k in list(DestXML.dest_dict.keys()):
+                if isinstance(DestXML.dest_dict[k], DestXML):
+                    processOneXML({"dest": DestXML.dest_dict[k],
+                         "mapping": self.paramMapping,
+                         "tempXMLDir": tempXMLDir,
+                         }, self.message_queue)
 
         for f in list(DestResource.pict_dict.keys()):
             if DestResource.pict_dict[f].sourceFile.isEncodedImage:
@@ -518,6 +524,14 @@ class GUIAppSingleton(tk.Frame):
             currentConfig.set("ArchiCAD", "aclocation",         self.ACLocation.get())
             currentConfig.set("ArchiCAD", "bcleanup",           str(self.bCleanup.get()))
             currentConfig.set("ArchiCAD", "allkeywords",        ', '.join(sorted(list(XMLFile.all_keywords))))
+        else:
+            currentConfig.set("ArchiCAD", "sourcexlsxpath",     self._currentConfig["sourcexlsxpath"])
+            currentConfig.set("ArchiCAD", "sourcedirname",      self._currentConfig["sourcedirname"])
+            currentConfig.set("ArchiCAD", "inputimagesource",   self._currentConfig["inputimagesource"])
+            currentConfig.set("ArchiCAD", "targetlcfpath",      self._currentConfig["targetlcfpath"])
+            currentConfig.set("ArchiCAD", "aclocation",         self._currentConfig["aclocation"])
+            currentConfig.set("ArchiCAD", "bcleanup",           self._currentConfig["bcleanup"])
+            currentConfig.set("ArchiCAD", "allkeywords",        self._currentConfig["allkeywords"])
 
         # if self.googleSpreadsheet:
         #     currentConfig.add_section("GoogleSpreadsheetAPI")
