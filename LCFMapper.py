@@ -9,11 +9,9 @@ Description:
 # FIXME to create a config-loader either from .conf file or registry
 # FIXME logging
 # FIXME {ACVERSION} for the sheets
-# FIXME fstrings
 
 import os.path
 import shutil
-import sys
 import tempfile
 
 import time
@@ -31,10 +29,7 @@ import asyncio
 from queue import Empty as QueueEmpty
 from concurrent.futures import ProcessPoolExecutor
 
-from decorator import Dumper
-
 MULTI_PROCESS = os.getenv('PYCHARM_HOSTED') != '1'
-MULTI_PROCESS = True
 
 try:
     from lxml import etree
@@ -68,10 +63,10 @@ class XLSXLoader:
                     _v = cell.value
                     _row.append(_v)
                 _result.append(_row)
-            return  _result
-        except:
+            return _result
+        except Exception as e:
             # GUIAppSingleton().print("WARNING - Missing attribute type: %s" % sheet_name)
-            print(_result)
+            print(e)
             raise
         # try:
         #     _result = [cell.value for cell in [row for row in self.wb[sheet_name]]]
@@ -163,7 +158,7 @@ class GUIAppSingleton(tk.Frame):
         self._iCurrentLock = mp.Lock()
         self._iTotalLock = mp.Lock()
         self._lock = mp.Lock()
-        self._log=""
+        self._log = ""
 
         # GUI itself----------------------------------------------------------------------------------------------------
 
@@ -173,7 +168,7 @@ class GUIAppSingleton(tk.Frame):
 
         iR += 1
 
-        self.textEntry = InputDirPlusText(self.top, "XML Source folder", self.SourceXMLDirName, row=iR, tooltip='Path of the folder where extracted .lcf file structure is')
+        self.textEntry = InputDirPlusText(self.top, "XML Source folder", self.SourceXMLDirName, row=iR, tooltip='Path of the folder where extracted .lcf file (in the form of .xml files) structure is.')
 
         iR += 1
 
@@ -212,7 +207,7 @@ class GUIAppSingleton(tk.Frame):
 
         iC += 1
 
-        CreateToolTip(self.debugCheckButton, "Print out debug info")
+        CreateToolTip(self.debugCheckButton, "Print out debug info. If active, the settings modified will not be written back to the .conf file.")
 
         self.cleanupCheckButton   = tk.Checkbutton(self.bottomFrame, {"text": "Cleanup", "variable": self.bCleanup})
         self.cleanupCheckButton.grid({"row": 0, "column": iC})
@@ -277,7 +272,7 @@ class GUIAppSingleton(tk.Frame):
     def _cancel_source_xml_processing(self):
         if self.task:
             self.task.cancel()
-        self.task=None
+        self.task = None
         self._iCurrent = 0
         self._iTotal = 0
 
@@ -301,7 +296,7 @@ class GUIAppSingleton(tk.Frame):
     def iTotal(self, value):
         with self._iTotalLock:
             self._iTotal = value
-            self.progressInfo.config(text=f"{self.iCurrent} / {self._iTotal}")
+            self.progressInfo.config(text=f"Scanning XML files (from XML Source Folder): {self._iTotal}")
 
     @property
     def iCurrent(self):
@@ -327,7 +322,7 @@ class GUIAppSingleton(tk.Frame):
         DestXML.id_dict.clear()
         DestResource.pict_dict.clear()
 
-    def print(self, text:str):
+    def print(self, text: str):
         with self._lock:
             self._sOutput.write(f"{text}\n")
             self.scrolledText.replace("1.0", "end", self._sOutput.getvalue())
@@ -360,6 +355,8 @@ class GUIAppSingleton(tk.Frame):
                 continue
             except BrokenPipeError:
                 break
+            except Exception as e:
+                self.print(e)
             await self.async_queue.put(message)
 
     async def print_out_async(self):
@@ -373,7 +370,6 @@ class GUIAppSingleton(tk.Frame):
         cpuCount = max(mp.cpu_count() - 1, 1)
 
         pool_map = [{"dest": DestXML.dest_dict[k],
-                     "mapping": self.paramMapping,
                      "tempXMLDir": tempXMLDir,
                      } for k in list(DestXML.dest_dict.keys()) if
                     isinstance(DestXML.dest_dict[k], DestXML)]
@@ -397,18 +393,16 @@ class GUIAppSingleton(tk.Frame):
         tempGDLDir = os.path.join(tempGDLDir, "Archicad Library 27")
         os.makedirs(tempGDLDir)
 
-        tempPicDir = tempfile.mkdtemp()  # For every image file, collected
         DestXML.sDestXMLDir = tempXMLDir
 
         self.print(f"tempXMLDir: {tempXMLDir}")
         self.print(f"tempGDLDir: {tempGDLDir}")
-        self.print(f"tempPicDir: {tempPicDir}")
 
         for sourceXML in SourceXML.replacement_dict.values():
             DestXML(sourceXML)
 
         for sourceResource in SourceResource.source_pict_dict.values():
-            DestResource(sourceResource, tempPicDir if sourceResource.isEncodedImage else tempGDLDir)
+            DestResource(sourceResource, tempGDLDir)
 
         try:
             if MULTI_PROCESS:
@@ -417,37 +411,8 @@ class GUIAppSingleton(tk.Frame):
                 for k in list(DestXML.dest_dict.keys()):
                     if isinstance(DestXML.dest_dict[k], DestXML):
                         processOneXML({"dest": DestXML.dest_dict[k],
-                             "mapping": self.paramMapping,
                              "tempXMLDir": tempXMLDir,
                              }, self.message_queue)
-
-            for f in list(DestResource.pict_dict.keys()):
-                if DestResource.pict_dict[f].sourceFile.isEncodedImage:
-                    #Now probably unused:
-                    try:
-                        shutil.copyfile(os.path.join(self.SourceImageDirName.get(),
-                                                     DestResource.pict_dict[f].sourceFile.relPath),
-                                        os.path.join(tempPicDir, DestResource.pict_dict[f].relPath))
-                    except IOError:
-                        os.makedirs(os.path.join(tempPicDir, DestResource.pict_dict[f].dirName))
-                        shutil.copyfile(os.path.join(self.SourceImageDirName.get(),
-                                                     DestResource.pict_dict[f].sourceFile.relPath),
-                                        os.path.join(tempPicDir, DestResource.pict_dict[f].relPath))
-                else:
-                    try:
-                        shutil.copyfile(DestResource.pict_dict[f].sourceFile.fullPath,
-                                        os.path.join(tempGDLDir, DestResource.pict_dict[f].relPath))
-                        if self.bDebug.get():
-                            shutil.copyfile(DestResource.pict_dict[f].sourceFile.fullPath,
-                                            os.path.join(tempXMLDir, DestResource.pict_dict[f].relPath))
-                    except IOError:
-                        os.makedirs(os.path.join(tempGDLDir, DestResource.pict_dict[f].dirName))
-                        shutil.copyfile(DestResource.pict_dict[f].sourceFile.fullPath,
-                                        os.path.join(tempGDLDir, DestResource.pict_dict[f].relPath))
-                        if self.bDebug.get():
-                            os.makedirs(os.path.join(tempXMLDir, DestResource.pict_dict[f].dirName))
-                            shutil.copyfile(DestResource.pict_dict[f].sourceFile.fullPath,
-                                            os.path.join(tempXMLDir, DestResource.pict_dict[f].relPath))
 
             x2lCommand = f'"{os.path.join(self.ACLocation.get(), "LP_XMLConverter.exe")}" x2l -img "{self.SourceImageDirName.get()}" "{tempXMLDir}" "{tempGDLDir}"'
 
@@ -456,27 +421,25 @@ class GUIAppSingleton(tk.Frame):
 
             result = subprocess.run(
                 [os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "x2l", "-img", self.SourceImageDirName.get(),
-                 tempXMLDir, tempGDLDir], capture_output=True, text=True, timeout=100, encoding="utf-8")
+                 tempXMLDir, tempGDLDir], capture_output=True, text=True, encoding="utf-8")
 
             output = result.stdout
             self.print(output)
 
             result = subprocess.run(
                 [os.path.join(self.ACLocation.get(), 'LP_XMLConverter.exe'), "createcontainer", self.TargetLCFPath.get(),
-                 tempGDLDir], capture_output=True, text=True, timeout=1000, encoding="utf-8")
+                 tempGDLDir], capture_output=True, text=True, encoding="utf-8")
             output = result.stdout
             self.print(output)
 
             # cleanup ops
             if self.bCleanup.get():
                 shutil.rmtree(tempXMLDir)
-                shutil.rmtree(tempPicDir)
             else:
                 self.print(f"tempXMLDir: {tempXMLDir}")
-                self.print(f"tempPicDir: {tempPicDir}")
                 self.print(f"tempGDLDir: {tempGDLDir}")
-                with open(os.path.join(tempGDLDir, "log.txt"), "w") as _file:
-                    _file.write(self._log)
+                # with open(os.path.join(tempGDLDir, "log.txt"), "w") as _file:
+                #     _file.write(self._log)
 
             self.print("*****FINISHED SUCCESFULLY******")
         except Exception as e:
@@ -567,12 +530,13 @@ class GUIAppSingleton(tk.Frame):
 
 
 def processOneXML(p_data, p_messageQueue):
+    """
+    Makes a DestXML from a SourceXML and places it into a subfolder of the tempXMLDir
+    """
     dest = p_data['dest']
-    mapping = p_data['mapping']
     tempDir = p_data["tempXMLDir"]
 
-    # FIXME ParamMappingContainer is the same for all so move to the singleton:
-    # mapping = ParamMappingContainer(GUIAppSingleton().SourceXLSXPath.get())
+    mapping = GUIAppSingleton().paramMapping
 
     src = dest.sourceFile
     srcPath = src.fullPath
@@ -591,6 +555,7 @@ def processOneXML(p_data, p_messageQueue):
     try:
         os.makedirs(destDir)
     except WindowsError:
+        # Probably the folder is already there, nothing to do
         pass
 
     with open(destPath, "w", encoding="utf-8-sig", newline="\n") as file_handle:
@@ -599,7 +564,7 @@ def processOneXML(p_data, p_messageQueue):
         sXML = xml_declaration + mdp_tostring
         file_handle.write(sXML)
 
-    p_messageQueue.put (f"{srcPath} -> {destPath}")
+    p_messageQueue.put(f"{srcPath} -> {destPath}")
 
 
 if __name__ == "__main__":
