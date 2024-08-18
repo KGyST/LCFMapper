@@ -143,11 +143,11 @@ class GUIAppSingleton(tk.Frame):
 
         self._currentConfig = Config("LCFMapper", "ArchiCAD")
 
-        self.SourceXLSXPath = tk.StringVar(self.top, self._currentConfig["sourcexlsxpath"])
-        self.SourceXMLDirName = tk.StringVar(self.top, self._currentConfig["sourcedirname"])
+        self.SourceXLSXPath     = tk.StringVar(self.top, self._currentConfig["sourcexlsxpath"])
+        self.SourceXMLDirName   = tk.StringVar(self.top, self._currentConfig["sourcedirname"])
         self.SourceImageDirName = tk.StringVar(self.top, self._currentConfig["inputimagesource"])
-        self.TargetLCFPath = tk.StringVar(self.top, self._currentConfig["targetlcfpath"])
-        self.ACLocation = tk.StringVar(self.top, self._currentConfig["aclocation"])
+        self.TargetLCFPath      = tk.StringVar(self.top, self._currentConfig["targetlcfpath"])
+        self.ACLocation         = tk.StringVar(self.top, self._currentConfig["aclocation"])
         self.bDebug             = tk.BooleanVar(self.top, self._currentConfig["bdebug"] != "False")
         self.bCleanup           = tk.BooleanVar(self.top, self._currentConfig["bcleanup"] != "False")
 
@@ -388,15 +388,14 @@ class GUIAppSingleton(tk.Frame):
         SourceXML.sSourceXMLDir = self.SourceXMLDirName.get()
         SourceResource.sSourceResourceDir = self.SourceImageDirName.get()
 
-        tempXMLDir = tempfile.mkdtemp()
-        tempGDLDir = tempfile.mkdtemp()
-        tempGDLDir = os.path.join(tempGDLDir, "Archicad Library 27")
+        _tempDir = tempfile.mkdtemp()
+        tempXMLDir = os.path.join(_tempDir, "XML")
+        tempGDLDir = os.path.join(_tempDir, "GDL", "Archicad Library 27")
         os.makedirs(tempGDLDir)
 
         DestXML.sDestXMLDir = tempXMLDir
 
-        self.print(f"tempXMLDir: {tempXMLDir}")
-        self.print(f"tempGDLDir: {tempGDLDir}")
+        self.print(f"tempDir: {_tempDir}")
 
         for sourceXML in SourceXML.replacement_dict.values():
             DestXML(sourceXML)
@@ -404,15 +403,35 @@ class GUIAppSingleton(tk.Frame):
         for sourceResource in SourceResource.source_pict_dict.values():
             DestResource(sourceResource, tempGDLDir)
 
+        if MULTI_PROCESS:
+            await self.loop.run_in_executor(None, self.worker_pool, tempXMLDir)
+        else:
+            for k in list(DestXML.dest_dict.keys()):
+                if isinstance(DestXML.dest_dict[k], DestXML):
+                    processOneXML({"dest": DestXML.dest_dict[k],
+                         "mapping": self.paramMapping,
+                         "tempXMLDir": tempXMLDir,
+                         }, self.message_queue)
         try:
             if MULTI_PROCESS:
                 await self.loop.run_in_executor(None, self.worker_pool, tempXMLDir)
-            else:
-                for k in list(DestXML.dest_dict.keys()):
-                    if isinstance(DestXML.dest_dict[k], DestXML):
-                        processOneXML({"dest": DestXML.dest_dict[k],
-                             "tempXMLDir": tempXMLDir,
-                             }, self.message_queue)
+
+            for f in list(DestResource.pict_dict.keys()):
+                if not DestResource.pict_dict[f].sourceFile.isEncodedImage:
+                    try:
+                        shutil.copyfile(DestResource.pict_dict[f].sourceFile.fullPath,
+                                        os.path.join(tempGDLDir, DestResource.pict_dict[f].relPath))
+                        if self.bDebug.get():
+                            shutil.copyfile(DestResource.pict_dict[f].sourceFile.fullPath,
+                                            os.path.join(tempXMLDir, DestResource.pict_dict[f].relPath))
+                    except IOError:
+                        os.makedirs(os.path.join(tempGDLDir, DestResource.pict_dict[f].dirName))
+                        shutil.copyfile(DestResource.pict_dict[f].sourceFile.fullPath,
+                                        os.path.join(tempGDLDir, DestResource.pict_dict[f].relPath))
+                        if self.bDebug.get():
+                            os.makedirs(os.path.join(tempXMLDir, DestResource.pict_dict[f].dirName))
+                            shutil.copyfile(DestResource.pict_dict[f].sourceFile.fullPath,
+                                            os.path.join(tempXMLDir, DestResource.pict_dict[f].relPath))
 
             x2lCommand = f'"{os.path.join(self.ACLocation.get(), "LP_XMLConverter.exe")}" x2l -img "{self.SourceImageDirName.get()}" "{tempXMLDir}" "{tempGDLDir}"'
 
@@ -434,10 +453,9 @@ class GUIAppSingleton(tk.Frame):
 
             # cleanup ops
             if self.bCleanup.get():
-                shutil.rmtree(tempXMLDir)
+                shutil.rmtree(_tempDir)
             else:
-                self.print(f"tempXMLDir: {tempXMLDir}")
-                self.print(f"tempGDLDir: {tempGDLDir}")
+                self.print(f"tempDir: {_tempDir}")
                 # with open(os.path.join(tempGDLDir, "log.txt"), "w") as _file:
                 #     _file.write(self._log)
 
@@ -563,8 +581,6 @@ def processOneXML(p_data, p_messageQueue):
         mdp_tostring = etree.tostring(mdp, pretty_print=True, encoding="UTF-8").decode("UTF-8")
         sXML = xml_declaration + mdp_tostring
         file_handle.write(sXML)
-
-    p_messageQueue.put(f"{srcPath} -> {destPath}")
 
 
 if __name__ == "__main__":
