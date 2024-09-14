@@ -15,6 +15,7 @@ import shutil
 import tempfile
 
 import time
+import tkinter
 from io import StringIO
 import subprocess
 import pip
@@ -46,6 +47,9 @@ from Async import Loop
 
 # FIXME Enums
 ID = ''
+LIGHT_GREEN = "#e7ffe5"
+LIGHT_RED = "#ffe5e5"
+
 
 #----------------- mapping classes -------------------------------------------------------------------------------------
 
@@ -164,7 +168,7 @@ class GUIAppSingleton(tk.Frame):
 
         iR = 0
 
-        InputDirPlusText(self.top, "XLSX name", self.SourceXLSXPath, row=iR, func=tkinter.filedialog.askopenfilename, title="Select file", tooltip="Path of the .xlsx file that describes the conversion")
+        self.XLSXEntry = InputDirPlusText(self.top, "XLSX name", self.SourceXLSXPath, row=iR, func=tkinter.filedialog.askopenfilename, title="Select file", tooltip="Path of the .xlsx file that describes the conversion")
 
         iR += 1
 
@@ -172,7 +176,7 @@ class GUIAppSingleton(tk.Frame):
 
         iR += 1
 
-        InputDirPlusText(self.top, "Images' source folder", self.SourceImageDirName, row=iR, tooltip="Path of image folder that is the result of extractontainer 's -img switch, for encoded images")
+        self.SourceImageEntry = InputDirPlusText(self.top, "Images' source folder", self.SourceImageDirName, row=iR, tooltip="Path of image folder that is the result of extractontainer 's -img switch, for encoded images")
 
         iR += 1
 
@@ -184,7 +188,7 @@ class GUIAppSingleton(tk.Frame):
 
         iR += 1
 
-        InputDirPlusText(self.top, "ArchiCAD location",  self.ACLocation, "ArchiCAD location", row=iR)
+        self.ACLocationEntry = InputDirPlusText(self.top, "ArchiCAD location",  self.ACLocation, "ArchiCAD location", row=iR)
 
         iR += 1
 
@@ -232,6 +236,8 @@ class GUIAppSingleton(tk.Frame):
 
         Observer(self.SourceXMLDirName, self._sourceXMLDirModified)
         Observer(self.SourceXLSXPath, self._sourceXLSXPathModified)
+        Observer(self.ACLocation, self._ACLocationPathModified)
+        Observer(self.SourceImageDirName, self._SourceImageDirNameModified)
         self.task = None
 
         self.loop = Loop(self.top)
@@ -249,18 +255,46 @@ class GUIAppSingleton(tk.Frame):
     def _startup(self):
         self._sourceXMLDirModified()
         self._sourceXLSXPathModified()
+        self._ACLocationPathModified()
+        self._SourceImageDirNameModified()
 
     def _sourceXMLDirModified(self, *_):
-        if self.SourceXMLDirName.get():
+        if _path := self.SourceXMLDirName.get():
+            if os.path.isdir(_path):
+                self.textEntry.setBackground(LIGHT_GREEN)
+            else:
+                self.textEntry.setBackground(LIGHT_RED)
             _ = self.tick
             self.textEntry.config(width=len(self.SourceXMLDirName.get()))
-            # self.update()
             self._start_source_xml_processing()
 
     def _sourceXLSXPathModified(self, *_):
         _path = self.SourceXLSXPath.get()
         if _path and os.path.isfile(_path):
             self.paramMapping = ParamMappingContainer(_path)
+            self.XLSXEntry.setBackground(LIGHT_GREEN)
+            if self.buttonStart.cget("text") == "Start":
+                self.buttonStart.config(state=tk.ACTIVE)
+        else:
+            self.XLSXEntry.setBackground(LIGHT_RED)
+            self.buttonStart.config(state=tk.DISABLED)
+
+    def _ACLocationPathModified(self, *_):
+        _path = self.ACLocation.get()
+        if _path and os.path.isfile(os.path.join(_path, 'LP_XMLConverter.exe')):
+            self.ACLocationEntry.setBackground(LIGHT_GREEN)
+            if self.buttonStart.cget("text") == "Start":
+                self.buttonStart.config(state=tk.ACTIVE)
+        else:
+            self.ACLocationEntry.setBackground(LIGHT_RED)
+            self.buttonStart.config(state=tk.DISABLED)
+
+    def _SourceImageDirNameModified(self, *_):
+        if _path := self.SourceImageDirName.get():
+            if os.path.isdir(_path):
+                self.SourceImageEntry.setBackground(LIGHT_GREEN)
+            else:
+                self.SourceImageEntry.setBackground(LIGHT_RED)
 
     def _start_source_xml_processing(self):
         self._cancel_source_xml_processing()
