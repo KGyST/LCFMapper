@@ -38,12 +38,12 @@ except ImportError:
     pip.main(['install', '--user', 'lxml'])
     from lxml import etree
 
-from GSMXMLLib import *
-from SamUITools import CreateToolTip, InputDirPlusText
-from Config import *
-from Constants import *
-from Undoable import *
-from Async import Loop
+from GSMParamLib.GSMXMLLib import *
+from GSMParamLib.SamUITools import CreateToolTip, InputDirPlusText
+from GSMParamLib.Config import *
+from GSMParamLib.Constants import *
+from GSMParamLib.Undoable import *
+from GSMParamLib.Async import Loop
 
 # FIXME Enums
 ID = ''
