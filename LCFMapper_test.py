@@ -1,8 +1,7 @@
-import os.path
-from samuTeszt.src.common.Storage import StorageTestSuite
+from samuTeszt.src.common.Storage import FileTestSuite
 
 
-class LCFMapperTestClient(StorageTestSuite):
+class LCFMapperTestClient(FileTestSuite):
     def __init__(self):
-        super().__init__(path="tests", error_path=os.path.join("..", "errors"))
+        super().__init__()
 

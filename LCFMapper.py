@@ -537,6 +537,8 @@ class GUIAppSingleton(tk.Frame):
         pass
 
     def writeConfigBack(self, ):
+        # self.currentConfig.writeConfigBack()
+
         # FIXME encrypting of sensitive data
         # TODO bdebug handling
         currentConfig = RawConfigParser()
@@ -577,16 +579,17 @@ class GUIAppSingleton(tk.Frame):
                 #FIXME
                 pass
 
+        # FIXME not here:
         self.loop.stop()
         self.top.destroy()
 
 
-def processOneXML(p_data, p_messageQueue):
+def processOneXML(data, message_queue):
     """
     Makes a DestXML from a SourceXML and places it into a subfolder of the tempXMLDir
     """
-    dest = p_data['dest']
-    tempDir = p_data["tempXMLDir"]
+    dest = data['dest']
+    tempDir = data["tempXMLDir"]
 
     mapping = GUIAppSingleton().paramMapping
 
@@ -595,7 +598,7 @@ def processOneXML(p_data, p_messageQueue):
     destPath = os.path.join(tempDir, dest.relPath)
     destDir = os.path.dirname(destPath)
 
-    p_messageQueue.put(f"{srcPath} -> {destPath}")
+    message_queue.put(f"{srcPath} -> {destPath}")
 
     mdp = etree.parse(srcPath, etree.XMLParser(strip_cdata=False))
 
