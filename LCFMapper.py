@@ -14,7 +14,6 @@ import os.path
 import shutil
 import tempfile
 
-# import time
 import tkinter
 from io import StringIO
 import subprocess
@@ -26,7 +25,6 @@ from tkinter import scrolledtext
 from configparser import *  #FIXME not *
 
 import multiprocessing as mp
-# import asyncio
 from queue import Empty as QueueEmpty
 from concurrent.futures import ProcessPoolExecutor
 
@@ -38,12 +36,8 @@ except ImportError:
   pip.main(['install', '--user', 'lxml'])
   from lxml import etree
 
-# from GSMParamLib.GSMXMLLib import *
 from GSMParamLib.SamUITools import CreateToolTip, InputDirPlusText
-# from GSMParamLib.Config import *
 from GSMParamLib.Constants import *
-from GSMParamLib.Undoable import *
-# from GSMParamLib.Async import Loop
 from GSMParamLib.GUIAppSingletonBase import *
 
 # FIXME Enums
@@ -52,8 +46,8 @@ LIGHT_GREEN = "#e7ffe5"
 LIGHT_RED = "#ffe5e5"
 LP_XML_CONVERTER = 'LP_XMLConverter.exe'
 
+# ----------------- mapping classes ------------------------------------------------------------------------------------
 
-#----------------- mapping classes -------------------------------------------------------------------------------------
 
 class XLSXLoader:
   def __init__(self, table_url:str):
@@ -140,12 +134,11 @@ class ParamMappingContainer:
 #----------------- gui classes -----------------------------------------------------------------------------------------
 
 @singleton
-class GUIAppSingleton(GUIAsyncMPAppBase):
+class GUIAppSingleton(XMLProcessorBase):
   def __init__(self):
-    super().__init__("LCFMapper")
+    super() .__init__("LCFMapper")
+
     self.SourceXLSXPath     = self.currentConfig.register(tk.StringVar(self.top), "sourcexlsxpath")
-    self.SourceXMLDirName   = self.currentConfig.register(tk.StringVar(self.top), "sourcedirname")
-    self.SourceImageDirName = self.currentConfig.register(tk.StringVar(self.top), "inputimagesource")
     self.TargetLCFPath      = self.currentConfig.register(tk.StringVar(self.top), "targetlcfpath")
     self.ACLocation         = self.currentConfig.register(tk.StringVar(self.top), "aclocation")
     self.bDebug             = self.currentConfig.register(tk.BooleanVar(self.top), "bdebug")
@@ -155,7 +148,6 @@ class GUIAppSingleton(GUIAsyncMPAppBase):
     self._iTotal = 0
     self._sOutput = StringIO()
     self._tick = time.perf_counter()
-    self._iCurrentLock = mp.Lock()
     self._lock = mp.Lock()
     self._log = ""
 
@@ -167,7 +159,7 @@ class GUIAppSingleton(GUIAsyncMPAppBase):
 
     iR += 1
 
-    self.textEntry = InputDirPlusText(self.top, "XML Source folder", self.SourceXMLDirName, row=iR, tooltip='Path of the folder where extracted .lcf file (in the form of .xml files) structure is.')
+    self.SourceXMLEntry = InputDirPlusText(self.top, "XML Source folder", self.SourceXMLDirName, row=iR, tooltip='Path of the folder where extracted .lcf file (in the form of .xml files) structure is.')
 
     iR += 1
 
@@ -187,14 +179,14 @@ class GUIAppSingleton(GUIAsyncMPAppBase):
 
     iR += 1
 
-    self.bottomFrame        = tk.Frame(self.top, )
+    self.bottomFrame = tk.Frame(self.top, )
     self.bottomFrame.grid({"row":iR, "sticky":  tk.S + tk.N, })
 
     # Bottom row----------------------------------------------------------------------------------------------------
 
     iC = 0
 
-    self.buttonStart        = tk.Button(self.bottomFrame, {"text": "Start", "command": self.start})
+    self.buttonStart = tk.Button(self.bottomFrame, {"text": "Start", "command": self.start})
     self.buttonStart.grid({"row": 0, "column": iC, "sticky": tk.E})
 
     iC += 1
@@ -227,7 +219,7 @@ class GUIAppSingleton(GUIAsyncMPAppBase):
     self.progressInfo = tk.Label(self.top, text=f"{self.iCurrent} / {self.iTotal}")
     self.progressInfo.grid({"row": iR, "column": 0, "sticky": tk.W}); iC += 1
 
-    self.top.protocol("WM_DELETE_WINDOW", self.writeConfigBack)
+    # self.top.protocol("WM_DELETE_WINDOW", self.writeConfigBack)
 
     Observer(self.SourceXMLDirName, self._sourceXMLDirModified)
     Observer(self.SourceXLSXPath, self._sourceXLSXPathModified)
@@ -244,24 +236,14 @@ class GUIAppSingleton(GUIAsyncMPAppBase):
 
     self._startup()
 
-  def mainloop(self, **kwargs) -> None:
-    self.loop.run_forever()
+  # def mainloop(self, **kwargs) -> None:
+  #   self.loop.run_forever()
 
   def _startup(self):
     self._sourceXMLDirModified()
     self._sourceXLSXPathModified()
     self._ACLocationPathModified()
     self._SourceImageDirNameModified()
-
-  def _sourceXMLDirModified(self, *_):
-    if _path := self.SourceXMLDirName.get():
-      if os.path.isdir(_path):
-        self.textEntry.setBackground(LIGHT_GREEN)
-      else:
-        self.textEntry.setBackground(LIGHT_RED)
-      _ = self.tick
-      self.textEntry.config(width=len(self.SourceXMLDirName.get()))
-      self._start_source_xml_processing()
 
   def _sourceXLSXPathModified(self, *_):
     _path = self.SourceXLSXPath.get()
@@ -273,6 +255,16 @@ class GUIAppSingleton(GUIAsyncMPAppBase):
     else:
       self.XLSXEntry.setBackground(LIGHT_RED)
       self.buttonStart.config(state=tk.DISABLED)
+
+  def _sourceXMLDirModified(self, *_):
+    if self.SourceXMLDirName.get():
+      _ = self.tick
+      self.SourceXMLEntry.config(width=len(self.SourceXMLDirName.get()))
+      self.start_source_xml_processing()
+
+  def setXMLRelatedInputs(self, state, text: str):
+    self.buttonStart.config(state=state, text=text)
+    self.SourceXMLEntry.config(state=state)
 
   def _ACLocationPathModified(self, *_):
     _path = self.ACLocation.get()
@@ -292,58 +284,10 @@ class GUIAppSingleton(GUIAsyncMPAppBase):
       else:
         self.SourceImageEntry.setBackground(LIGHT_RED)
 
-  def _start_source_xml_processing(self):
-    self._cancel_source_xml_processing()
-    self.buttonStart.config(state=tk.DISABLED, text="Processing...")
-    self.textEntry.config(state=tk.DISABLED)
-    self.task = self.loop.create_task(self._process())
-    self.task.add_done_callback(self._end_of_xml_dir_processing)
-
-  def _cancel_source_xml_processing(self):
-    if self.task:
-      self.task.cancel()
-    self.task = None
-    self._iCurrent = 0
-    self._iTotal = 0
-
-  def _end_of_xml_dir_processing(self, task):
-    self.buttonStart.config(state=tk.NORMAL, text="Start")
-    self.textEntry.config(state=tk.NORMAL)
-    # self._refresh_outputs()
-    self.progressInfo.config(text=f"{self.iCurrent} / {self.iTotal} Scanning dirs took {self.tick:.2f} seconds")
-
   def _end_of_conversion(self, task):
     self.buttonStart.config(state=tk.NORMAL, text="Start")
-    self.textEntry.config(state=tk.NORMAL)
+    self.SourceXMLEntry.config(state=tk.NORMAL)
     self.progressInfo.config(text=f"Conversion of {self.iTotal} objects took {self.tick:.2f} seconds")
-
-  @property
-  def iTotal(self):
-    with self._iTotalLock:
-      return self._iTotal
-
-  @iTotal.setter
-  def iTotal(self, value):
-    with self._iTotalLock:
-      self._iTotal = value
-      self.progressInfo.config(text=f"Scanning XML files (from XML Source Folder): {self._iTotal}")
-
-  @property
-  def iCurrent(self):
-    with self._iCurrentLock:
-      return self._iCurrent
-
-  @iCurrent.setter
-  def iCurrent(self, value):
-    with self._iCurrentLock:
-      self._iCurrent = value
-      self.progressInfo.config(text=f"{self._iCurrent} / {self.iTotal}")
-
-  @property
-  def tick(self):
-    _t = self._tick
-    self._tick = time.perf_counter()
-    return self._tick - _t
 
   @staticmethod
   def clear_data():
@@ -367,11 +311,6 @@ class GUIAppSingleton(GUIAsyncMPAppBase):
     self.task.add_done_callback(self._end_of_conversion)
 
     self.print("Starting conversion")
-
-  async def _process(self):
-    SourceXML.sSourceXMLDir = self.SourceXMLDirName.get()
-    SourceResource.sSourceResourceDir = self.SourceImageDirName.get()
-    await self.scanDirFactory(self.SourceXMLDirName.get(), current_folder='')
 
   async def mp_queue_to_async_queue(self):
     """
@@ -493,47 +432,6 @@ class GUIAppSingleton(GUIAsyncMPAppBase):
        source_dir, target_dir], capture_output=True, text=True, encoding="utf-8")
     output = result.stdout
     self.print(output)
-
-  def getConfig(self):
-    pass
-
-  def writeConfigBack(self, ):
-    # self.currentConfig.writeConfigBack()
-
-    # FIXME encrypting of sensitive data
-    # TODO bdebug handling
-    currentConfig = RawConfigParser()
-    currentConfig.add_section("ArchiCAD")
-    currentConfig.set("ArchiCAD", "bdebug", str(self.bDebug.get()))
-
-    if not self.bDebug.get():
-      currentConfig.set("ArchiCAD", "sourcexlsxpath",     self.SourceXLSXPath.get())
-      currentConfig.set("ArchiCAD", "sourcedirname",      self.SourceXMLDirName.get())
-      currentConfig.set("ArchiCAD", "inputimagesource",   self.SourceImageDirName.get())
-      currentConfig.set("ArchiCAD", "targetlcfpath",      self.TargetLCFPath.get())
-      currentConfig.set("ArchiCAD", "aclocation",         self.ACLocation.get())
-      currentConfig.set("ArchiCAD", "bcleanup",           str(self.bCleanup.get()))
-      currentConfig.set("ArchiCAD", "allkeywords",        ', '.join(sorted(list(XMLFile.all_keywords))))
-    else:
-      currentConfig.set("ArchiCAD", "sourcexlsxpath", self.currentConfig["sourcexlsxpath"])
-      currentConfig.set("ArchiCAD", "sourcedirname", self.currentConfig["sourcedirname"])
-      currentConfig.set("ArchiCAD", "inputimagesource", self.currentConfig["inputimagesource"])
-      currentConfig.set("ArchiCAD", "targetlcfpath", self.currentConfig["targetlcfpath"])
-      currentConfig.set("ArchiCAD", "aclocation", self.currentConfig["aclocation"])
-      currentConfig.set("ArchiCAD", "bcleanup", self.currentConfig["bcleanup"])
-      currentConfig.set("ArchiCAD", "allkeywords", self.currentConfig["allkeywords"])
-
-    with open(os.path.join(os.getenv('APPDATA'), "LCFMapper.ini"), 'w', encoding="UTF-8") as configFile:
-      #FIXME proper config place
-      try:
-        currentConfig.write(configFile)
-      except UnicodeEncodeError:
-        #FIXME
-        pass
-
-    # FIXME not here:
-    self.loop.stop()
-    self.top.destroy()
 
 
 def processOneXML(data, message_queue):
