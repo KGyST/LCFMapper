@@ -44,6 +44,7 @@ from GSMParamLib.GUIAppSingletonBase import *
 ID = ''
 LIGHT_GREEN = "#e7ffe5"
 LIGHT_RED = "#ffe5e5"
+LIGHT_WHITE = "#ffffff"
 LP_XML_CONVERTER = 'LP_XMLConverter.exe'
 
 # ----------------- mapping classes ------------------------------------------------------------------------------------
@@ -155,15 +156,23 @@ class GUIAppSingleton(XMLProcessorBase):
 
     iR = 0
 
-    self.XLSXEntry = InputDirPlusText(self.top, "XLSX name", self.SourceXLSXPath, row=iR, func=tkinter.filedialog.askopenfilename, title="Select file", tooltip="Path of the .xlsx file that describes the conversion")
+    self.XLSXEntry = InputDirPlusText(self.top, "XLSX name", self.SourceXLSXPath,
+                                      row=iR,
+                                      func=tkinter.filedialog.askopenfilename,
+                                      title="Select file",
+                                      tooltip="Path of the .xlsx file that describes the conversion")
 
     iR += 1
 
-    self.SourceXMLEntry = InputDirPlusText(self.top, "XML Source folder", self.SourceXMLDirName, row=iR, tooltip='Path of the folder where extracted .lcf file (in the form of .xml files) structure is.')
+    self.SourceXMLEntry = InputDirPlusText(self.top, "XML Source folder", self.SourceXMLDirName,
+                                           row=iR,
+                                           tooltip='Path of the folder where extracted .lcf file (in the form of .xml files) structure is.')
 
     iR += 1
 
-    self.SourceImageEntry = InputDirPlusText(self.top, "Images' source folder", self.SourceImageDirName, row=iR, tooltip="Path of image folder that is the result of extractontainer 's -img switch, for encoded images")
+    self.SourceImageEntry = InputDirPlusText(self.top, "Images' source folder", self.SourceImageDirName,
+                                             row=iR,
+                                             tooltip="Path of image folder that is the result of extractontainer 's -img switch, for encoded images")
 
     iR += 1
 
@@ -171,7 +180,11 @@ class GUIAppSingleton(XMLProcessorBase):
 
     # iR += 1
 
-    InputDirPlusText(self.top, "LCF Destination path", self.TargetLCFPath, "LCF Destination path", row=iR, func=tkinter.filedialog.asksaveasfilename, title="Select file")
+    InputDirPlusText(self.top, "LCF Destination path", self.TargetLCFPath, "LCF Destination path",
+                     row=iR,
+                     func=tkinter.filedialog.asksaveasfilename,
+                     title="Select file",
+                     validator=self._targetfileValidator(".lcf"))
 
     iR += 1
 
@@ -239,17 +252,33 @@ class GUIAppSingleton(XMLProcessorBase):
   # def mainloop(self, **kwargs) -> None:
   #   self.loop.run_forever()
 
+  @staticmethod
+  def _targetfileValidator(ext):
+    def __targetfileValidator(path : str) -> str:
+      from pathlib import Path
+      _path = Path(path)
+      if not os.path.exists(_path.parent):
+        return f"Target folder doesn't exist"
+      elif _path.suffix != ext:
+        return f"Target file doesn't have the right extension: {ext}"
+      elif os.path.exists(path):
+        return f"Target file already exists"
+      return ""
+    return __targetfileValidator
+
   def _startup(self):
     self._sourceXMLDirModified()
     self._sourceXLSXPathModified()
     self._ACLocationPathModified()
     self._SourceImageDirNameModified()
 
+  # Entries modified:
+
   def _sourceXLSXPathModified(self, *_):
     _path = self.SourceXLSXPath.get()
     if _path and os.path.isfile(_path):
       self.paramMapping = ParamMappingContainer(_path)
-      self.XLSXEntry.setBackground(LIGHT_GREEN)
+      self.XLSXEntry.setBackground(LIGHT_WHITE)
       if self.buttonStart.cget("text") == "Start":
         self.buttonStart.config(state=tk.ACTIVE)
     else:
@@ -260,17 +289,13 @@ class GUIAppSingleton(XMLProcessorBase):
     if self.SourceXMLDirName.get():
       _ = self.tick
       self.SourceXMLEntry.config(width=len(self.SourceXMLDirName.get()))
-      self.start_source_xml_processing()
-
-  def setXMLRelatedInputs(self, state, text: str):
-    self.buttonStart.config(state=state, text=text)
-    self.SourceXMLEntry.config(state=state)
+      self.start_source_xml_processing(self._end_of_scanning)
 
   def _ACLocationPathModified(self, *_):
     _path = self.ACLocation.get()
     LP_XML_CONVERTER = 'LP_XMLConverter.exe'
     if _path and os.path.isfile(os.path.join(_path, LP_XML_CONVERTER)):
-      self.ACLocationEntry.setBackground(LIGHT_GREEN)
+      self.ACLocationEntry.setBackground(LIGHT_WHITE)
       if self.buttonStart.cget("text") == "Start":
         self.buttonStart.config(state=tk.ACTIVE)
     else:
@@ -280,14 +305,24 @@ class GUIAppSingleton(XMLProcessorBase):
   def _SourceImageDirNameModified(self, *_):
     if _path := self.SourceImageDirName.get():
       if os.path.isdir(_path):
-        self.SourceImageEntry.setBackground(LIGHT_GREEN)
+        self.SourceImageEntry.setBackground(LIGHT_WHITE)
       else:
         self.SourceImageEntry.setBackground(LIGHT_RED)
+
+  # def setXMLRelatedInputs(self, state, text: str):
+  #   self.buttonStart.config(state=state, text=text)
+  #   self.SourceXMLEntry.config(state=state)
+
+  # Callbacks
 
   def _end_of_conversion(self, task):
     self.buttonStart.config(state=tk.NORMAL, text="Start")
     self.SourceXMLEntry.config(state=tk.NORMAL)
     self.progressInfo.config(text=f"Conversion of {self.iTotal} objects took {self.tick:.2f} seconds")
+
+  def _end_of_scanning(self, task):
+    self.buttonStart.config(state=tk.NORMAL, text="Start")
+    self.progressInfo.config(text=f"Scanning of {self.iTotal} objects took {self.tick:.2f} seconds")
 
   @staticmethod
   def clear_data():
